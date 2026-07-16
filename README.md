@@ -197,7 +197,7 @@ python -c "import re; print(len(re.findall(r'types\.Tool\(\s*name=', open('src/m
 | `import_poe_ninja_url` | Import character from a poe.ninja profile URL (league-segment aware) |
 | `compare_to_top_players` | Compare your build to ladder leaders (protobuf builds API) |
 | `analyze_passive_tree` | Analyze allocated passive nodes with pathfinding |
-| `calculate_character_dps` | Server-side spell DPS, including the optional DoT layer (ignite/poison/bleed + skill DoT) |
+| `calculate_character_dps` | Server-side spell **or weapon-attack** DPS (pass `weapon_damage` for bow/melee skills like Tornado Shot/Ice Shot/Snipe), including the optional DoT layer (ignite/poison/bleed + skill DoT) |
 | `get_live_game_state` | Read the running PoE2 client's Client.txt (character, area, deaths) — local, no network |
 | `get_game_config` | Read local game config INI (gateway, input mode, renderer) |
 

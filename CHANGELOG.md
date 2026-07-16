@@ -7,6 +7,17 @@ Format based on Path of Building changelog style, adapted for MCP tooling.
 
 ---
 
+## Unreleased
+
+--- MCP Tools ---
+* `calculate_character_dps` now covers weapon-attack skills (bow/melee), not just spells. Passing `weapon_damage` routes the call to a new `AttackDPSCalculator` (`src/calculator/attack_dps_calculator.py`) instead of `SpellDPSCalculator` — fixes Tornado Shot / Ice Shot / Snipe (and any other skill with a `baseMultiplier` in `skill_gems_v2.json`) coming back "not resolvable", since those skills scale off weapon damage rather than an innate spell base and the calculator only understood the latter. The spell path's failure message now also detects when a queried name is actually an attack skill and points the caller at `weapon_damage` instead of a dead end
+* Add `resolve_attack_from_v2` (`src/calculator/v2_spell_db.py`), the attack-skill counterpart to `resolve_spell_from_v2` — derives damage effectiveness (`levels[N].baseMultiplier`) and a skill-innate attack-speed modifier (`levels[N].attackSpeedMultiplier`) from the same v2 extraction
+* Factor the DoT-layer renderer (#159) out of `_handle_calculate_character_dps` into a shared `_build_dot_section` helper so both the spell and attack paths can attach an optional damage-over-time layer without duplicating the ~90-line block
+
+--- Testing ---
+* Add `tests/test_attack_dps_calculator.py` (pure-math coverage: weapon damage averaging, effectiveness scaling — including that it applies to added flat damage the same way spell damage effectiveness does — increased/more stacking, crit weighting, attack-speed combination, resistance application)
+* Extend `tests/test_v2_spell_db.py` with `resolve_attack_from_v2` coverage against the real Ice Shot / Tornado Shot / Snipe records, including the Snipe gem-level-1 edge case (no `baseMultiplier` at that tier — channel-charge entry) resolving to `None` rather than crashing
+
 ## Version 1.0.4 (2026-06-16) - permissioned self-update
 
 Closes the "no data release published" gap and adds a consent-based self-update path so the server updates its game data and code only with the user's permission.

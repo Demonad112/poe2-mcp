@@ -180,6 +180,81 @@ def get_v2_skill_record(spell_name: str) -> Optional[Dict[str, Any]]:
     return out
 
 
+def resolve_attack_from_v2(skill_name: str, gem_level: int = 20) -> Optional[Dict[str, Any]]:
+    """Look up a weapon-attack skill in skill_gems_v2.json and derive
+    AttackStats-shaped kwargs, for skills that scale off weapon damage
+    (Tornado Shot, Ice Shot, Snipe, ...) rather than an innate spell
+    base. Companion to resolve_spell_from_v2 - see that function's
+    docstring for the general lookup semantics (name/skill_id/substring,
+    case-insensitive).
+
+    Attack skills don't carry min/max base damage in their statSets the
+    way spells do; instead `record.levels[N]` carries:
+      - baseMultiplier: the skill's damage effectiveness (% of weapon
+        damage per hit, e.g. 0.95 = 95%, 4.14 = 414%)
+      - attackSpeedMultiplier: a skill-innate +/-% attack speed modifier
+        (e.g. Ice Shot -10, Snipe -55)
+
+    Args:
+        skill_name: User-supplied skill name (e.g. "Ice Shot") or skill_id.
+        gem_level: 1-indexed gem level. Defaults to 20.
+
+    Returns:
+        Dict shaped for ``AttackStats(**resolve_attack_from_v2(...))``
+        (after popping `_v2_meta`):
+          {name, damage_effectiveness, attack_speed_multiplier,
+           damage_types, _v2_meta: {skill_id, gem_level, source}}
+
+        Returns None when:
+          - skill_gems_v2.json is absent
+          - skill_name doesn't resolve to any record
+          - the resolved level entry has no baseMultiplier (e.g. Snipe's
+            gem level 1, or a non-attack/spell skill) - the caller should
+            fall back to spell_stats-style overrides for these.
+    """
+    skills = _load_v2_skills()
+    if not skills:
+        return None
+
+    found = _find_skill(skill_name, skills)
+    if not found:
+        return None
+    skill_id, record = found
+
+    record_levels = record.get("levels")
+    if not isinstance(record_levels, list) or not record_levels:
+        return None
+    level_idx = max(0, min(gem_level - 1, len(record_levels) - 1))
+    lvl_entry = record_levels[level_idx]
+    if not isinstance(lvl_entry, dict) or "baseMultiplier" not in lvl_entry:
+        return None
+
+    try:
+        damage_effectiveness = float(lvl_entry["baseMultiplier"])
+    except (ValueError, TypeError):
+        return None
+    try:
+        attack_speed_multiplier = float(lvl_entry.get("attackSpeedMultiplier", 0) or 0)
+    except (ValueError, TypeError):
+        attack_speed_multiplier = 0.0
+
+    damage_types = _derive_damage_types(record)
+    if "physical" not in damage_types:
+        damage_types = ["physical"] + damage_types
+
+    return {
+        "name": record.get("name") or skill_name,
+        "damage_effectiveness": damage_effectiveness,
+        "attack_speed_multiplier": attack_speed_multiplier,
+        "damage_types": damage_types,
+        "_v2_meta": {
+            "skill_id": skill_id,
+            "gem_level": gem_level,
+            "source": "data/game/skill_gems/skill_gems_v2.json",
+        },
+    }
+
+
 def resolve_spell_from_v2(spell_name: str, gem_level: int = 20) -> Optional[Dict[str, Any]]:
     """Look up a spell in skill_gems_v2.json and derive SpellStats-shaped dict.
 
