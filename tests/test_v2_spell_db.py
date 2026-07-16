@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.calculator.v2_spell_db import (  # noqa: E402
     SKILLTYPE_TO_DAMAGE_TYPE,
+    resolve_attack_from_v2,
     resolve_spell_from_v2,
 )
 
@@ -156,3 +157,74 @@ def test_resolve_returns_none_when_v2_file_absent(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "_CACHE", None)
 
     assert resolve_spell_from_v2("Ice Nova") is None
+
+
+# ---------------------------------------------------------------------------
+# resolve_attack_from_v2 — weapon-attack skills (bow/melee), companion to
+# resolve_spell_from_v2 for skills with no innate spell base damage.
+# ---------------------------------------------------------------------------
+
+
+@needs_v2
+def test_resolve_ice_shot_by_name():
+    r = resolve_attack_from_v2("Ice Shot", gem_level=20)
+    assert r is not None
+    assert r["name"] == "Ice Shot"
+    assert r["damage_effectiveness"] > 1.0  # Ice Shot scales well past 100% by lvl 20
+    assert "physical" in r["damage_types"]
+    assert "cold" in r["damage_types"]
+
+
+@needs_v2
+def test_resolve_ice_shot_by_skill_id():
+    r = resolve_attack_from_v2("IceShotPlayer", gem_level=1)
+    assert r is not None
+    assert r["name"] == "Ice Shot"
+
+
+@needs_v2
+def test_resolve_tornado_shot_has_baseMultiplier_derived_effectiveness():
+    r = resolve_attack_from_v2("Tornado Shot", gem_level=20)
+    assert r is not None
+    assert r["damage_effectiveness"] > 0
+    assert r["damage_types"][0] == "physical"
+
+
+@needs_v2
+def test_resolve_snipe_gem_level_1_has_no_basemultiplier():
+    """Snipe's gem_level=1 entry (levels[0]) carries no baseMultiplier
+    (it's the channel-charge tier) — must return None, not crash, so the
+    MCP handler can fall back to attack_stats."""
+    r = resolve_attack_from_v2("Snipe", gem_level=1)
+    assert r is None
+
+
+@needs_v2
+def test_resolve_snipe_gem_level_20_has_basemultiplier():
+    r = resolve_attack_from_v2("Snipe", gem_level=20)
+    assert r is not None
+    assert r["damage_effectiveness"] > 0
+
+
+@needs_v2
+def test_resolve_attack_damage_types_always_leads_with_physical():
+    """Weapon-attack hits are physical-primary by convention here, even
+    when the gem also carries an elemental skillType tag (e.g. Ice
+    Shot's Cold tag) — resistance math uses damage_types[0]."""
+    r = resolve_attack_from_v2("Ice Shot", gem_level=20)
+    assert r is not None
+    assert r["damage_types"][0] == "physical"
+
+
+def test_resolve_attack_returns_none_for_unknown_skill():
+    assert resolve_attack_from_v2("Definitely Not A Real Skill Name") is None
+
+
+def test_resolve_attack_returns_none_when_v2_file_absent(tmp_path, monkeypatch):
+    import src.calculator.v2_spell_db as mod
+
+    fake = tmp_path / "definitely_not_there.json"
+    monkeypatch.setattr(mod, "_skill_gems_v2_path", lambda: fake)
+    monkeypatch.setattr(mod, "_CACHE", None)
+
+    assert resolve_attack_from_v2("Ice Shot") is None

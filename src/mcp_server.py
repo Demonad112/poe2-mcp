@@ -1054,15 +1054,20 @@ class PoE2BuildOptimizerMCP:
                 types.Tool(
                     name="calculate_character_dps",
                     description=(
-                        "Compute spell DPS server-side using PoE2 formulas. "
-                        "Accepts an aggregated set of modifiers (sum of increased %, "
-                        "list of more multipliers, added flat damage, crit, cast speed, "
-                        "optional enemy resistances) and returns a structured DPS "
-                        "breakdown — base damage, increased/more multipliers, crit "
-                        "expected hit, post-resistance final, casts/sec, DPS. The math "
-                        "lives in src/calculator/spell_dps_calculator.py and is the "
-                        "single source of truth. Use this instead of asking the AI to "
-                        "do the math in its head."
+                        "Compute spell OR weapon-attack DPS server-side using PoE2 "
+                        "formulas. Accepts an aggregated set of modifiers (sum of "
+                        "increased %, list of more multipliers, added flat damage, "
+                        "crit, cast/attack speed, optional enemy resistances) and "
+                        "returns a structured DPS breakdown — base damage, "
+                        "increased/more multipliers, crit expected hit, "
+                        "post-resistance final, casts-or-attacks/sec, DPS. Spells "
+                        "(base_damage_min/max) use "
+                        "src/calculator/spell_dps_calculator.py; passing "
+                        "`weapon_damage` instead routes to the weapon-attack path "
+                        "in src/calculator/attack_dps_calculator.py for bow/melee "
+                        "skills like Tornado Shot, Ice Shot, or Snipe that scale off "
+                        "weapon damage rather than an innate spell base. Use this "
+                        "instead of asking the AI to do the math in its head."
                     ),
                     inputSchema={
                         "type": "object",
@@ -1142,6 +1147,66 @@ class PoE2BuildOptimizerMCP:
                             "has_archmage": {
                                 "type": "boolean",
                                 "description": "Whether Archmage support is active. Default false.",
+                            },
+                            "weapon_damage": {
+                                "type": "object",
+                                "description": (
+                                    "Presence of this field routes the whole call to "
+                                    "the weapon-attack path (AttackDPSCalculator) "
+                                    "instead of the spell path — for bow/melee skills "
+                                    "(Tornado Shot, Ice Shot, Snipe, ...) that scale "
+                                    "off weapon damage. Shape: {physical: {min, max}, "
+                                    "fire: {min, max}, cold: {min, max}, lightning: "
+                                    "{min, max}, chaos: {min, max}} — only populate "
+                                    "the types your weapon actually rolls; added "
+                                    "elemental damage from gear/tree still goes in "
+                                    "`added_damage`, not here. `spell_name` is reused "
+                                    "as the skill name for lookup in this mode; "
+                                    "`gem_level` still applies."
+                                ),
+                            },
+                            "weapon_attacks_per_second": {
+                                "type": "number",
+                                "description": (
+                                    "Base weapon attacks-per-second (local attack "
+                                    "speed already rolled in). Required for the "
+                                    "weapon-attack path; ignored for spells. Default 1.0."
+                                ),
+                            },
+                            "attack_stats": {
+                                "type": "object",
+                                "description": (
+                                    "Weapon-attack analogue of spell_stats — override "
+                                    "the skill's own effectiveness instead of looking "
+                                    "it up. Shape: {name, damage_effectiveness "
+                                    "(e.g. 0.95 = 95% of weapon damage), "
+                                    "attack_speed_multiplier (skill-innate +/-% attack "
+                                    "speed, e.g. Ice Shot's -10), damage_types (list, "
+                                    "primary type first)}."
+                                ),
+                            },
+                            "increased_attack_damage": {
+                                "type": "number",
+                                "description": (
+                                    "Weapon-attack path only: sum of all %increased "
+                                    "attack/skill damage (additive). Default 0."
+                                ),
+                            },
+                            "increased_attack_speed": {
+                                "type": "number",
+                                "description": (
+                                    "Weapon-attack path only: sum of all %increased "
+                                    "attack speed (additive, combined with the "
+                                    "skill's own attack_speed_multiplier). Default 0."
+                                ),
+                            },
+                            "base_crit_chance": {
+                                "type": "number",
+                                "description": (
+                                    "Weapon-attack path only: base critical strike "
+                                    "chance (weapon + global base, not gem-derived "
+                                    "like a spell's). PoE2 default is 5.0."
+                                ),
                             },
                             "enemy": {
                                 "type": "object",
@@ -4191,6 +4256,352 @@ Consider:
         )
         return response
 
+    def _build_dot_section(
+        self,
+        dot_in: dict,
+        result: dict,
+        char_mods,
+        enemy,
+        damage_types: List[str],
+        damage_effectiveness: float,
+        rate_per_second: float,
+    ):
+        """Shared DoT-layer renderer for calculate_character_dps (#159).
+
+        Factored out so both the spell path and the weapon-attack path
+        (added for bow/melee skills — see AttackDPSCalculator) can attach
+        an optional damage-over-time layer without duplicating this ~90
+        line block. `char_mods` just needs added_fire/added_cold/
+        added_lightning/added_chaos/added_physical attributes — both
+        CharacterModifiers (spell) and AttackModifiers (attack) satisfy
+        that. `rate_per_second` is casts/sec for spells, attacks/sec for
+        weapon attacks.
+
+        Returns:
+            (dot_section_lines: list[str], dot_totals: dict | None)
+        """
+        dot_section: list = []
+        dot_totals = None
+        if not dot_in:
+            return dot_section, dot_totals
+
+        try:
+            from .calculator.dot_calculator import (
+                DoTCalculator,
+                AilmentInput,
+                SkillDoTInput,
+                split_expected_hit_by_type,
+            )
+        except ImportError:
+            from src.calculator.dot_calculator import (
+                DoTCalculator,
+                AilmentInput,
+                SkillDoTInput,
+                split_expected_hit_by_type,
+            )
+
+        dot_calc = DoTCalculator()
+        breakdown = result.get("breakdown") or {}
+
+        hit_by_type = {
+            k.lower(): float(v_) for k, v_ in (dot_in.get("hit_damage_by_type") or {}).items()
+        }
+        if not hit_by_type:
+            hit_by_type = split_expected_hit_by_type(
+                expected_hit=float(breakdown.get("expected_hit", 0.0)),
+                base_damage=float(breakdown.get("base_damage", 0.0)),
+                primary_type=(damage_types[0] if damage_types else None),
+                added_by_type={
+                    "fire": char_mods.added_fire,
+                    "cold": char_mods.added_cold,
+                    "lightning": char_mods.added_lightning,
+                    "chaos": char_mods.added_chaos,
+                    "physical": char_mods.added_physical,
+                },
+                damage_effectiveness=damage_effectiveness,
+            )
+
+        ailment_results = []
+        for a in dot_in.get("ailments") or []:
+            ailment_results.append(
+                dot_calc.calculate_ailment_dot(
+                    AilmentInput(
+                        ailment=str(a.get("type", "")),
+                        chance_pct=float(a.get("chance", 100)),
+                        increased_magnitude=float(a.get("increased_magnitude", 0)),
+                        more_multipliers=[float(m) for m in (a.get("more_multipliers") or [])],
+                        increased_duration=float(a.get("increased_duration", 0)),
+                        stack_limit=int(a.get("stack_limit", 1)),
+                        enemy_moving=bool(a.get("enemy_moving", False)),
+                        aggravated=bool(a.get("aggravated", False)),
+                    ),
+                    hit_damage_by_type=hit_by_type,
+                    hits_per_second=rate_per_second,
+                    enemy=enemy,
+                )
+            )
+
+        skill_dot_result = None
+        sd = dot_in.get("skill_dot") or {}
+        if sd:
+            skill_dot_result = dot_calc.calculate_skill_dot(
+                SkillDoTInput(
+                    base_dps=float(sd.get("base_dps", 0)),
+                    damage_type=str(sd.get("damage_type", "chaos")),
+                    increased=float(sd.get("increased", 0)),
+                    more_multipliers=[float(m) for m in (sd.get("more_multipliers") or [])],
+                    uptime=float(sd.get("uptime", 1.0)),
+                ),
+                enemy=enemy,
+            )
+
+        dot_totals = dot_calc.combine(
+            hit_dps=float(result.get("total_dps", 0.0)),
+            ailment_results=ailment_results,
+            skill_dot_result=skill_dot_result,
+        )
+
+        dot_section.append("## Damage over Time")
+        for r in ailment_results:
+            if "error" in r:
+                dot_section.append(f"- ⚠️ {r['error']}")
+                continue
+            dot_section.append(
+                f"- **{r['ailment']}** ({r['damage_type']}): "
+                f"{r['sustained_dps']} sustained DPS "
+                f"({r['dps_per_stack']}/stack × {r['expected_active_stacks']} "
+                f"avg stacks, {r['duration_seconds']}s duration, "
+                f"{r['applications_per_second']} applications/s)"
+            )
+        if skill_dot_result:
+            dot_section.append(
+                f"- **Skill DoT** ({skill_dot_result['damage_type']}): "
+                f"{skill_dot_result['sustained_dps']} sustained DPS "
+                f"({skill_dot_result['dps_at_full_uptime']} at full uptime "
+                f"× {skill_dot_result['uptime']} uptime)"
+            )
+        dot_section.append("")
+        dot_section.append(
+            f"**Sustained totals**: hit {dot_totals['hit_dps']} + "
+            f"DoT {dot_totals['dot_dps']} = "
+            f"**{dot_totals['total_sustained_dps']} total sustained DPS**"
+        )
+        dot_section.append("")
+        return dot_section, dot_totals
+
+    async def _handle_attack_dps(self, args: dict) -> List[types.TextContent]:
+        """Weapon-attack branch of calculate_character_dps.
+
+        Bow/melee skills (Tornado Shot, Ice Shot, Snipe, ...) scale off
+        weapon damage rather than an innate spell base, so they need a
+        different input shape (weapon_damage + weapon_attacks_per_second
+        instead of a spell's own base_damage_min/max). Triggered when the
+        caller passes `weapon_damage` — see AttackDPSCalculator in
+        src/calculator/attack_dps_calculator.py for the math, which
+        mirrors SpellDPSCalculator's canonical PoE2 formula shape.
+        """
+        try:
+            from .calculator.attack_dps_calculator import (
+                AttackDPSCalculator,
+                AttackStats,
+                AttackModifiers,
+                WeaponStats,
+                WeaponDamageRange,
+            )
+            from .calculator.spell_dps_calculator import EnemyStats
+            from .calculator.v2_spell_db import resolve_attack_from_v2
+            from .data.game_data import get_version
+        except ImportError:
+            from src.calculator.attack_dps_calculator import (
+                AttackDPSCalculator,
+                AttackStats,
+                AttackModifiers,
+                WeaponStats,
+                WeaponDamageRange,
+            )
+            from src.calculator.spell_dps_calculator import EnemyStats
+            from src.calculator.v2_spell_db import resolve_attack_from_v2
+            from src.data.game_data import get_version
+
+        calc = AttackDPSCalculator()
+
+        skill_name = (args.get("spell_name") or "").strip()
+        attack_stats_override = args.get("attack_stats") or {}
+        gem_level = int(args.get("gem_level") or 20)
+
+        if attack_stats_override:
+            attack = AttackStats(
+                name=attack_stats_override.get("name") or skill_name or "custom attack",
+                damage_effectiveness=float(attack_stats_override.get("damage_effectiveness", 1.0)),
+                attack_speed_multiplier=float(
+                    attack_stats_override.get("attack_speed_multiplier", 0)
+                ),
+                damage_types=list(attack_stats_override.get("damage_types") or ["physical"]),
+            )
+            attack_source = "caller-supplied attack_stats"
+        elif skill_name:
+            v2 = resolve_attack_from_v2(skill_name, gem_level=gem_level)
+            if v2 is None:
+                return [
+                    types.TextContent(
+                        type="text",
+                        text=(
+                            f"'{skill_name}' isn't resolvable as a weapon-attack skill "
+                            f"from data/game/skill_gems/skill_gems_v2.json either (no "
+                            f"baseMultiplier at gem_level={gem_level}, or the v2 file "
+                            f"isn't shipped in this checkout). Pass `attack_stats` "
+                            f"with damage_effectiveness, attack_speed_multiplier, "
+                            f"damage_types instead."
+                        ),
+                    )
+                ]
+            v2_meta = v2.pop("_v2_meta", {})
+            attack = AttackStats(
+                name=v2["name"],
+                damage_effectiveness=v2["damage_effectiveness"],
+                attack_speed_multiplier=v2["attack_speed_multiplier"],
+                damage_types=v2["damage_types"],
+            )
+            attack_source = (
+                f"data/game/skill_gems/skill_gems_v2.json -> "
+                f"{v2_meta.get('skill_id')} @ gem_level={gem_level}"
+            )
+        else:
+            return [
+                types.TextContent(
+                    type="text",
+                    text="Error: provide spell_name (attack-skill lookup) or attack_stats (custom).",
+                )
+            ]
+
+        # ---- Weapon damage ----
+        wd = args.get("weapon_damage") or {}
+
+        def _range(key: str) -> WeaponDamageRange:
+            r = wd.get(key) or {}
+            return WeaponDamageRange(
+                min_damage=float(r.get("min", 0)), max_damage=float(r.get("max", 0))
+            )
+
+        weapon = WeaponStats(
+            physical=_range("physical"),
+            fire=_range("fire"),
+            cold=_range("cold"),
+            lightning=_range("lightning"),
+            chaos=_range("chaos"),
+            attacks_per_second=float(args.get("weapon_attacks_per_second") or 1.0),
+        )
+
+        # ---- Character modifiers ----
+        added = args.get("added_damage") or {}
+        char_mods = AttackModifiers(
+            increased_attack_damage=float(args.get("increased_attack_damage", 0)),
+            increased_attack_speed=float(args.get("increased_attack_speed", 0)),
+            increased_crit_damage=float(args.get("increased_crit_damage", 0)),
+            more_multipliers=[float(m) for m in (args.get("more_multipliers") or [])],
+            added_fire=float(added.get("fire", 0)),
+            added_cold=float(added.get("cold", 0)),
+            added_lightning=float(added.get("lightning", 0)),
+            added_chaos=float(added.get("chaos", 0)),
+            added_physical=float(added.get("physical", 0)),
+            added_crit_bonus=float(args.get("added_crit_bonus", 100)),
+            increased_crit_chance=float(args.get("increased_crit_chance", 0)),
+            base_crit_chance=float(args.get("base_crit_chance", 5.0)),
+        )
+
+        # ---- Enemy stats ----
+        enemy_in = args.get("enemy") or {}
+        enemy = EnemyStats(
+            fire_resistance=float(enemy_in.get("fire_resistance", 0)),
+            cold_resistance=float(enemy_in.get("cold_resistance", 0)),
+            lightning_resistance=float(enemy_in.get("lightning_resistance", 0)),
+            chaos_resistance=float(enemy_in.get("chaos_resistance", 0)),
+            physical_resistance=float(enemy_in.get("physical_resistance", 0)),
+            fire_exposure=float(enemy_in.get("fire_exposure", 0)),
+            cold_exposure=float(enemy_in.get("cold_exposure", 0)),
+            lightning_exposure=float(enemy_in.get("lightning_exposure", 0)),
+            fire_penetration=float(enemy_in.get("fire_penetration", 0)),
+            cold_penetration=float(enemy_in.get("cold_penetration", 0)),
+            lightning_penetration=float(enemy_in.get("lightning_penetration", 0)),
+            is_shocked=bool(enemy_in.get("is_shocked", False)),
+        )
+
+        result = calc.calculate_dps(weapon, attack, char_mods, enemy)
+
+        dot_in = args.get("dot") or {}
+        dot_section, dot_totals = self._build_dot_section(
+            dot_in,
+            result,
+            char_mods,
+            enemy,
+            damage_types=attack.damage_types,
+            damage_effectiveness=attack.damage_effectiveness,
+            rate_per_second=float(result.get("attacks_per_second", 0.0)),
+        )
+
+        v = get_version() or {}
+        lines = []
+        lines.append(f"# {attack.name} DPS (weapon attack)")
+        lines.append("")
+        lines.append(f"- **Total DPS**: {result.get('total_dps', 0)}")
+        lines.append(f"- **Average hit**: {result.get('average_hit', 0)}")
+        lines.append(f"- **Attacks/sec**: {result.get('attacks_per_second', 0)}")
+        lines.append(f"- **Crit chance**: {result.get('crit_chance', 0)}%")
+        lines.append("")
+
+        breakdown = result.get("breakdown") or {}
+        if breakdown:
+            lines.append("## Breakdown")
+            wdbt = breakdown.get("weapon_damage_by_type") or {}
+            lines.append(
+                "- Weapon damage (avg): " + ", ".join(f"{k} {v_}" for k, v_ in wdbt.items() if v_)
+            )
+            lines.append(f"- Added damage: {breakdown.get('added_damage', 0)}")
+            lines.append(
+                f"- After damage effectiveness "
+                f"(×{breakdown.get('multipliers', {}).get('effectiveness', 1.0)}): "
+                f"{breakdown.get('after_effectiveness', 0)}"
+            )
+            lines.append(f"- After increased: {breakdown.get('after_increased', 0)}")
+            lines.append(f"- After more: {breakdown.get('after_more', 0)}")
+            lines.append(f"- Expected hit (crit-weighted): {breakdown.get('expected_hit', 0)}")
+            lines.append(f"- After resistance: {breakdown.get('after_resistance', 0)}")
+            mults = breakdown.get("multipliers") or {}
+            if mults:
+                lines.append("")
+                lines.append("**Multipliers applied:**")
+                lines.append(f"- Effectiveness: ×{mults.get('effectiveness', 1.0)}")
+                lines.append(f"- Increased: ×{mults.get('increased', 1.0)}")
+                lines.append(f"- More (multiplicative): ×{mults.get('more', 1.0)}")
+                lines.append(f"- Crit: ×{mults.get('crit', 1.0)}")
+            lines.append("")
+
+        if dot_section:
+            lines.extend(dot_section)
+
+        if result.get("error"):
+            lines.append(f"⚠️  **Calculator error**: {result['error']}")
+            lines.append("")
+
+        lines.append("---")
+        lines.append(
+            f"**Source**: {attack_source} → "
+            f"`src/calculator/attack_dps_calculator.py::AttackDPSCalculator.calculate_dps`. "
+            f"Formula mirrors the canonical spell DPS math with weapon damage standing "
+            f"in for spell base damage; damage_effectiveness / attack_speed_multiplier "
+            f"come from PathOfBuilding-PoE2's extracted skill data "
+            f"(levels[N].baseMultiplier / attackSpeedMultiplier) — verify against "
+            f"patch notes if results look off, especially for skills with a secondary "
+            f"periodic/DoT component (e.g. Tornado Shot's tornado) that this covers via "
+            f"the optional `dot` block only if you supply it."
+        )
+        if v:
+            lines.append(
+                f"**Data version**: {v.get('released_as', '?')} "
+                f"(extracted {v.get('extracted_at', '?')})"
+            )
+        return [types.TextContent(type="text", text="\n".join(lines))]
+
     async def _handle_calculate_character_dps(self, args: dict) -> List[types.TextContent]:
         """Server-side spell DPS calculation. P5 / Issue #114.
 
@@ -4200,7 +4611,15 @@ Consider:
         PoE2 formula in src/calculator/spell_dps_calculator.py, and returns
         the structured breakdown. No mental math, no AI rounding errors, no
         forgotten multipliers.
+
+        Weapon-attack skills (bow/melee — Tornado Shot, Ice Shot, Snipe, ...)
+        scale off weapon damage rather than an innate spell base and need a
+        different input shape, so passing `weapon_damage` routes the whole
+        call to _handle_attack_dps / AttackDPSCalculator instead.
         """
+        if args.get("weapon_damage"):
+            return await self._handle_attack_dps(args)
+
         try:
             try:
                 from .calculator.spell_dps_calculator import (
@@ -4250,7 +4669,33 @@ Consider:
                     # Fall back to skill_gems_v2 lookup (#119, ~1,249 spells).
                     v2 = resolve_spell_from_v2(spell_name, gem_level=gem_level)
                     if v2 is None:
+                        # Before giving up, check whether this is actually a
+                        # weapon-attack skill (bow/melee) rather than a spell —
+                        # those need weapon_damage, not base_damage_min/max.
+                        try:
+                            from .calculator.v2_spell_db import resolve_attack_from_v2
+                        except ImportError:
+                            from src.calculator.v2_spell_db import resolve_attack_from_v2
+                        attack_probe = resolve_attack_from_v2(spell_name, gem_level=gem_level)
                         available = ", ".join(sorted(calc.SPELL_DATABASE.keys()))
+                        if attack_probe is not None:
+                            return [
+                                types.TextContent(
+                                    type="text",
+                                    text=(
+                                        f"'{spell_name}' is a weapon-attack skill "
+                                        f"(damage_effectiveness "
+                                        f"{attack_probe['damage_effectiveness']} at "
+                                        f"gem_level={gem_level}), not a spell — it "
+                                        f"scales off weapon damage, so "
+                                        f"base_damage_min/max don't apply. Call this "
+                                        f"same tool again with `weapon_damage` "
+                                        f"(shape: {{physical: {{min, max}}, fire: "
+                                        f"{{min, max}}, ...}}) and "
+                                        f"`weapon_attacks_per_second` to get its DPS."
+                                    ),
+                                )
+                            ]
                         return [
                             types.TextContent(
                                 type="text",
@@ -4258,12 +4703,14 @@ Consider:
                                     f"Spell '{spell_name}' not in the built-in "
                                     f"database ({available}) and not resolvable "
                                     f"from data/game/skill_gems/skill_gems_v2.json "
-                                    f"either (or the v2 file isn't shipped in "
-                                    f"this checkout). For exotic spells or "
-                                    f"unsupported scaling layouts, pass "
-                                    f"`spell_stats` with base_damage_min/max, "
-                                    f"base_crit_chance, base_cast_time, "
-                                    f"damage_types."
+                                    f"either as a spell or a weapon-attack skill "
+                                    f"(or the v2 file isn't shipped in this "
+                                    f"checkout). For exotic spells or unsupported "
+                                    f"scaling layouts, pass `spell_stats` with "
+                                    f"base_damage_min/max, base_crit_chance, "
+                                    f"base_cast_time, damage_types — or "
+                                    f"`weapon_damage` + `attack_stats` if it's an "
+                                    f"attack."
                                 ),
                             )
                         ]
@@ -4335,120 +4782,15 @@ Consider:
 
             # ---- DoT layer (#159) — optional `dot` block ----
             dot_in = args.get("dot") or {}
-            dot_section: list = []
-            dot_totals = None
-            if dot_in:
-                try:
-                    from .calculator.dot_calculator import (
-                        DoTCalculator,
-                        AilmentInput,
-                        SkillDoTInput,
-                        split_expected_hit_by_type,
-                    )
-                except ImportError:
-                    from src.calculator.dot_calculator import (
-                        DoTCalculator,
-                        AilmentInput,
-                        SkillDoTInput,
-                        split_expected_hit_by_type,
-                    )
-
-                dot_calc = DoTCalculator()
-                breakdown = result.get("breakdown") or {}
-
-                # Hit damage by type: explicit override, else attribute the
-                # crit-weighted expected hit (pre-resistance — ailment
-                # magnitude is based on unmitigated damage dealt).
-                hit_by_type = {
-                    k.lower(): float(v_)
-                    for k, v_ in (dot_in.get("hit_damage_by_type") or {}).items()
-                }
-                if not hit_by_type:
-                    hit_by_type = split_expected_hit_by_type(
-                        expected_hit=float(breakdown.get("expected_hit", 0.0)),
-                        base_damage=float(breakdown.get("base_damage", 0.0)),
-                        primary_type=(spell.damage_types[0] if spell.damage_types else None),
-                        added_by_type={
-                            "fire": char_mods.added_fire,
-                            "cold": char_mods.added_cold,
-                            "lightning": char_mods.added_lightning,
-                            "chaos": char_mods.added_chaos,
-                            "physical": char_mods.added_physical,
-                        },
-                        damage_effectiveness=spell.damage_effectiveness,
-                    )
-
-                hits_per_second = float(result.get("casts_per_second", 0.0))
-
-                ailment_results = []
-                for a in dot_in.get("ailments") or []:
-                    ailment_results.append(
-                        dot_calc.calculate_ailment_dot(
-                            AilmentInput(
-                                ailment=str(a.get("type", "")),
-                                chance_pct=float(a.get("chance", 100)),
-                                increased_magnitude=float(a.get("increased_magnitude", 0)),
-                                more_multipliers=[
-                                    float(m) for m in (a.get("more_multipliers") or [])
-                                ],
-                                increased_duration=float(a.get("increased_duration", 0)),
-                                stack_limit=int(a.get("stack_limit", 1)),
-                                enemy_moving=bool(a.get("enemy_moving", False)),
-                                aggravated=bool(a.get("aggravated", False)),
-                            ),
-                            hit_damage_by_type=hit_by_type,
-                            hits_per_second=hits_per_second,
-                            enemy=enemy,
-                        )
-                    )
-
-                skill_dot_result = None
-                sd = dot_in.get("skill_dot") or {}
-                if sd:
-                    skill_dot_result = dot_calc.calculate_skill_dot(
-                        SkillDoTInput(
-                            base_dps=float(sd.get("base_dps", 0)),
-                            damage_type=str(sd.get("damage_type", "chaos")),
-                            increased=float(sd.get("increased", 0)),
-                            more_multipliers=[float(m) for m in (sd.get("more_multipliers") or [])],
-                            uptime=float(sd.get("uptime", 1.0)),
-                        ),
-                        enemy=enemy,
-                    )
-
-                dot_totals = dot_calc.combine(
-                    hit_dps=float(result.get("total_dps", 0.0)),
-                    ailment_results=ailment_results,
-                    skill_dot_result=skill_dot_result,
-                )
-
-                # Render the DoT section
-                dot_section.append("## Damage over Time")
-                for r in ailment_results:
-                    if "error" in r:
-                        dot_section.append(f"- ⚠️ {r['error']}")
-                        continue
-                    dot_section.append(
-                        f"- **{r['ailment']}** ({r['damage_type']}): "
-                        f"{r['sustained_dps']} sustained DPS "
-                        f"({r['dps_per_stack']}/stack × {r['expected_active_stacks']} "
-                        f"avg stacks, {r['duration_seconds']}s duration, "
-                        f"{r['applications_per_second']} applications/s)"
-                    )
-                if skill_dot_result:
-                    dot_section.append(
-                        f"- **Skill DoT** ({skill_dot_result['damage_type']}): "
-                        f"{skill_dot_result['sustained_dps']} sustained DPS "
-                        f"({skill_dot_result['dps_at_full_uptime']} at full uptime "
-                        f"× {skill_dot_result['uptime']} uptime)"
-                    )
-                dot_section.append("")
-                dot_section.append(
-                    f"**Sustained totals**: hit {dot_totals['hit_dps']} + "
-                    f"DoT {dot_totals['dot_dps']} = "
-                    f"**{dot_totals['total_sustained_dps']} total sustained DPS**"
-                )
-                dot_section.append("")
+            dot_section, dot_totals = self._build_dot_section(
+                dot_in,
+                result,
+                char_mods,
+                enemy,
+                damage_types=spell.damage_types,
+                damage_effectiveness=spell.damage_effectiveness,
+                rate_per_second=float(result.get("casts_per_second", 0.0)),
+            )
 
             # ---- Format response ----
             v = get_version() or {}
