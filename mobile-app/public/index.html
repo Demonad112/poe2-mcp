@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PoE2 Build Ledger</title>
+<meta name="description" content="Import a poe.ninja profile and get a defenses/passive-tree/ladder/gear build analysis, installable on your phone.">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#14161c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef0f2" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PoE2 Ledger">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#eef0f2; --bg-grid:#e2e5e9; --surface:#ffffff; --surface-2:#f5f6f8;
+  --border:#d8dce2; --border-strong:#c3c9d1; --ink:#1a1d24; --ink-soft:#3c4250;
+  --muted:#5b6472; --faint:#8a92a0; --accent:#8f6a1e; --accent-ink:#6b4f16;
+  --accent-soft:#f2e6cc; --accent-glow:rgba(143,106,30,.16);
+  --fire:#c9502e; --cold:#3081a1; --lightning:#8f7b30; --chaos:#8a4bb8;
+  --good:#3f7a3b; --warning:#a5720f; --critical:#af2f3f;
+  --shadow:0 1px 2px rgba(20,22,28,.06), 0 8px 24px -12px rgba(20,22,28,.12);
+  --radius:3px; color-scheme:light;
+}
+@media (prefers-color-scheme: dark){ :root{
+  --bg:#14161c; --bg-grid:#191c23; --surface:#1b1f28; --surface-2:#20242e;
+  --border:#2b303b; --border-strong:#3a4150; --ink:#edf0f4; --ink-soft:#c7cdd8;
+  --muted:#98a1b0; --faint:#6c7385; --accent:#d3a750; --accent-ink:#e8c789;
+  --accent-soft:#3a301a; --accent-glow:rgba(211,167,80,.14);
+  --fire:#d97a51; --cold:#5fb8dd; --lightning:#c4ac54; --chaos:#bd85e0;
+  --good:#74b26e; --warning:#dba13f; --critical:#dd6b78;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.5);
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#14161c; --bg-grid:#191c23; --surface:#1b1f28; --surface-2:#20242e;
+  --border:#2b303b; --border-strong:#3a4150; --ink:#edf0f4; --ink-soft:#c7cdd8;
+  --muted:#98a1b0; --faint:#6c7385; --accent:#d3a750; --accent-ink:#e8c789;
+  --accent-soft:#3a301a; --accent-glow:rgba(211,167,80,.14);
+  --fire:#d97a51; --cold:#5fb8dd; --lightning:#c4ac54; --chaos:#bd85e0;
+  --good:#74b26e; --warning:#dba13f; --critical:#dd6b78;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 12px 32px -14px rgba(0,0,0,.5); color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --bg:#eef0f2; --bg-grid:#e2e5e9; --surface:#ffffff; --surface-2:#f5f6f8;
+  --border:#d8dce2; --border-strong:#c3c9d1; --ink:#1a1d24; --ink-soft:#3c4250;
+  --muted:#5b6472; --faint:#8a92a0; --accent:#8f6a1e; --accent-ink:#6b4f16;
+  --accent-soft:#f2e6cc; --accent-glow:rgba(143,106,30,.16);
+  --fire:#c9502e; --cold:#3081a1; --lightning:#8f7b30; --chaos:#8a4bb8;
+  --good:#3f7a3b; --warning:#a5720f; --critical:#af2f3f;
+  --shadow:0 1px 2px rgba(20,22,28,.06), 0 8px 24px -12px rgba(20,22,28,.12); color-scheme:light;
+}
+
+*,*::before,*::after{box-sizing:border-box;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  margin:0;
+  background:radial-gradient(1200px 600px at 15% -10%, var(--accent-glow), transparent 60%), var(--bg);
+  color:var(--ink); font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+a{color:inherit;}
+img,svg{display:block;max-width:100%;}
+button,input{font-family:inherit;}
+button{cursor:pointer;}
+.mono{font-family:'IBM Plex Mono',ui-monospace,Consolas,monospace; font-variant-numeric:tabular-nums;}
+.eyebrow{font-family:'IBM Plex Mono',monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); font-weight:500;}
+.display{font-family:'Cinzel','Georgia',serif; text-wrap:balance;}
+h1,h2,h3{margin:0; text-wrap:balance;}
+p{margin:0;}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+
+/* ---------- shell & tabs ---------- */
+.shell{max-width:1180px; margin:0 auto; padding:0 24px 96px;}
+.topbar{position:sticky; top:0; z-index:40; backdrop-filter:blur(10px) saturate(1.1);
+  background:color-mix(in srgb, var(--bg) 82%, transparent); border-bottom:1px solid var(--border);}
+.topbar-inner{max-width:1180px; margin:0 auto; padding:0 24px; display:flex; align-items:center; gap:16px; height:56px;}
+.brand{display:flex; align-items:baseline; gap:8px; font-family:'Cinzel'; font-weight:600; font-size:15px; letter-spacing:.03em; white-space:nowrap; flex:none; cursor:pointer;}
+.brand .rune{color:var(--accent);}
+.tabbar{display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; flex:1;}
+.tabbar::-webkit-scrollbar{display:none;}
+.tabbar button{
+  flex:none; appearance:none; background:none; border:none; font-size:12.5px; font-weight:500;
+  color:var(--muted); padding:8px 13px; border-radius:999px; white-space:nowrap;
+  transition:color .15s ease, background-color .15s ease;
+}
+.tabbar button:hover{color:var(--ink);}
+.tabbar button[aria-selected="true"]{color:var(--accent-ink); background:var(--accent-soft); font-weight:600;}
+.btn-new{
+  flex:none; font-size:12px; font-weight:600; padding:7px 12px; border-radius:999px;
+  border:1px solid var(--border-strong); background:var(--surface-2); color:var(--ink-soft);
+}
+.btn-new:hover{border-color:var(--accent);}
+
+.panel{display:none; padding-top:36px;}
+.panel.active{display:block;}
+.panel:first-child{padding-top:36px;}
+
+.section-head{display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:22px; flex-wrap:wrap;}
+.section-head h2{font-family:'Cinzel'; font-weight:600; font-size:22px; letter-spacing:.01em;}
+.section-head .count{font-size:12.5px; color:var(--faint);}
+
+/* ---------- plate / card ---------- */
+.plate{position:relative; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow);}
+.plate::before,.plate::after{content:''; position:absolute; width:9px; height:9px; pointer-events:none; border-color:var(--border-strong);}
+.plate::before{top:-1px; left:-1px; border-top:1px solid; border-left:1px solid;}
+.plate::after{bottom:-1px; right:-1px; border-bottom:1px solid; border-right:1px solid;}
+
+/* ---------- import screen ---------- */
+.import-wrap{min-height:calc(100vh - 56px); display:flex; align-items:center; justify-content:center; padding:24px;}
+.import-card{max-width:520px; width:100%; padding:36px 32px;}
+.import-card .rune-big{font-family:'Cinzel'; font-size:15px; color:var(--accent); text-align:center; letter-spacing:.2em; margin-bottom:6px;}
+.import-card h1{font-family:'Cinzel'; font-weight:600; font-size:28px; text-align:center; margin-bottom:8px;}
+.import-card .sub{color:var(--muted); font-size:13.5px; text-align:center; margin-bottom:26px; line-height:1.5;}
+.import-form{display:flex; flex-direction:column; gap:10px;}
+.import-form input{
+  width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:6px;
+  padding:12px 14px; color:var(--ink); font-size:14px;
+}
+.import-form input:focus{border-color:var(--accent);}
+.import-form button{
+  background:var(--accent); color:#20180a; border:none; border-radius:6px; padding:12px 14px;
+  font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.import-form button:disabled{opacity:.6; cursor:not-allowed;}
+.import-hint{font-size:11.5px; color:var(--faint); text-align:center; margin-top:2px;}
+.import-error{
+  font-size:12.5px; color:var(--critical); background:color-mix(in srgb, var(--critical) 10%, transparent);
+  border:1px solid var(--critical); border-radius:6px; padding:10px 12px; display:none; line-height:1.5;
+}
+.import-error.show{display:block;}
+.spinner{width:16px; height:16px; border-radius:50%; border:2px solid rgba(0,0,0,.25); border-top-color:#20180a; animation:spin .7s linear infinite; display:none;}
+.spinner.show{display:block;}
+@keyframes spin{to{transform:rotate(360deg);}}
+@media (prefers-reduced-motion:reduce){ .spinner{animation:none;} }
+.recent-list{margin-top:18px; display:flex; flex-direction:column; gap:6px;}
+.recent-item{
+  display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12.5px;
+  padding:9px 12px; border-radius:6px; border:1px solid var(--border); background:var(--surface-2);
+}
+.recent-item button.load{background:none; border:none; color:var(--ink-soft); font-weight:500; text-align:left; flex:1; padding:0;}
+.recent-item .x{background:none; border:none; color:var(--faint); font-size:14px; padding:0 2px;}
+
+/* ---------- hero ---------- */
+.hero{display:grid; grid-template-columns:1.3fr 1fr; gap:20px;}
+.hero-plate{padding:28px 30px;}
+.hero-top{display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap;}
+.hero-name{font-size:40px; font-weight:600; letter-spacing:.01em; line-height:1.05;}
+.hero-tags{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
+.tag{font-size:11.5px; font-weight:500; padding:4px 9px; border-radius:999px; border:1px solid var(--border-strong); color:var(--ink-soft); display:inline-flex; align-items:center; gap:5px;}
+.tag .dot{width:6px; height:6px; border-radius:50%; background:var(--accent);}
+.hero-level{text-align:right;}
+.hero-level .num{font-family:'IBM Plex Mono'; font-size:34px; font-weight:600; line-height:1;}
+.hero-level .lbl{font-size:11px; color:var(--muted); letter-spacing:.1em; text-transform:uppercase; margin-top:4px;}
+.tier-row{display:flex; align-items:center; gap:22px; margin-top:26px; padding-top:22px; border-top:1px solid var(--border);}
+.gauge-wrap{position:relative; width:104px; height:104px; flex:none;}
+.gauge-wrap svg{width:100%; height:100%; transform:rotate(-90deg);}
+.gauge-label{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;}
+.gauge-label .grade{font-family:'Cinzel'; font-weight:700; font-size:28px; color:var(--accent-ink);}
+.gauge-label .score{font-family:'IBM Plex Mono'; font-size:11px; color:var(--muted);}
+.tier-copy .k{font-size:12.5px; color:var(--muted);}
+.tier-copy .v{font-size:14.5px; margin-top:2px; max-width:40ch;}
+.stat-tiles{display:grid; grid-template-columns:repeat(2,1fr); gap:10px;}
+.stat-tile{padding:16px 16px 14px;}
+.stat-tile .k{font-size:11px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase;}
+.stat-tile .v{font-family:'IBM Plex Mono'; font-size:24px; font-weight:600; margin-top:6px;}
+.stat-tile .v small{font-family:'IBM Plex Sans'; font-size:12px; color:var(--muted); font-weight:500;}
+.stat-tile .d{font-size:12px; color:var(--muted); margin-top:4px;}
+.stat-tile.crit .v{color:var(--critical);} .stat-tile.good .v{color:var(--good);}
+
+/* ---------- resistances ---------- */
+.res-grid{display:flex; flex-direction:column; gap:14px;}
+.res-row{display:grid; grid-template-columns:118px 1fr 74px; align-items:center; gap:14px;}
+.res-name{display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:500;}
+.res-swatch{width:9px; height:9px; border-radius:2px; flex:none;}
+.res-track{position:relative; height:10px; border-radius:4px; background:var(--surface-2); border:1px solid var(--border);}
+.res-fill{position:absolute; inset:0 auto 0 0; border-radius:4px 0 0 4px;}
+.res-cap-line{position:absolute; top:-3px; bottom:-3px; width:1px; background:var(--ink-soft); opacity:.5;}
+.res-cap-line::after{content:'75%'; position:absolute; top:-16px; left:50%; transform:translateX(-50%); font-size:9.5px; color:var(--faint); font-family:'IBM Plex Mono';}
+.res-value{font-family:'IBM Plex Mono'; font-size:14px; font-weight:600; text-align:right;}
+.res-value.crit{color:var(--critical);}
+
+.sw-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px;}
+.sw-list li{display:flex; gap:9px; align-items:flex-start; font-size:13.5px;}
+.sw-icon{flex:none; width:16px; height:16px; margin-top:1px;}
+.sw-title{font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; font-weight:600;}
+
+.grid-2{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+.grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+.grid-4{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+.pad{padding:18px 20px;}
+
+.notable-card{padding:14px 16px;}
+.notable-card h4{font-size:13.5px; font-weight:600; margin-bottom:5px;}
+.notable-card p{font-size:12.5px; color:var(--muted); line-height:1.45;}
+.notable-card .empty{font-size:12px; color:var(--faint); font-style:italic;}
+.pick-badge{display:inline-block; font-family:'IBM Plex Mono'; font-size:10px; font-weight:600; padding:2px 6px; border-radius:3px; background:var(--accent-soft); color:var(--accent-ink); margin-bottom:6px; letter-spacing:.03em;}
+
+.smallnode-list{column-count:2; column-gap:22px;}
+@media (max-width:860px){ .smallnode-list{column-count:1;} }
+.smallnode-row{display:grid; grid-template-columns:1fr 70px 30px; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid var(--border); font-size:12.5px; break-inside:avoid;}
+.smallnode-row:last-child{border-bottom:none;}
+.smallnode-name{color:var(--ink-soft); font-weight:500;}
+.smallnode-eff{color:var(--faint); font-size:11.5px; grid-column:1/-1; margin-top:-4px; padding-bottom:2px;}
+.smallnode-bar{height:6px; border-radius:3px; background:var(--surface-2); position:relative; overflow:hidden; border:1px solid var(--border);}
+.smallnode-bar i{position:absolute; inset:0 auto 0 0; background:var(--accent); opacity:.55; border-radius:3px;}
+.smallnode-count{font-family:'IBM Plex Mono'; text-align:right; font-weight:600; color:var(--ink-soft);}
+
+.jewel-card{padding:16px 18px;}
+.jewel-card .slot{font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin-bottom:8px;}
+.jewel-card h4{font-size:14px; font-weight:600;}
+.jewel-card .base{font-size:11.5px; color:var(--muted); margin-top:1px;}
+.modlist{list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:5px;}
+.modlist li{font-size:12px; color:var(--ink-soft); line-height:1.4; padding-left:11px; position:relative;}
+.modlist li::before{content:''; position:absolute; left:0; top:7px; width:5px; height:1px; background:var(--faint);}
+.modlist li.enchant{color:var(--accent-ink);}
+.empty-note{font-size:12.5px; color:var(--faint); font-style:italic; padding:8px 0;}
+
+.compare-tiles{display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+.compare-tile{padding:16px 18px;}
+.compare-tile .k{font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted);}
+.compare-bars{margin-top:12px; display:flex; flex-direction:column; gap:8px;}
+.compare-bar-row{display:grid; grid-template-columns:44px 1fr 60px; align-items:center; gap:8px; font-size:11.5px;}
+.compare-bar-row .lbl{color:var(--muted); font-weight:500;}
+.compare-bar-track{height:9px; background:var(--surface-2); border:1px solid var(--border); border-radius:3px; position:relative;}
+.compare-bar-fill{position:absolute; inset:0 auto 0 0; border-radius:2px;}
+.compare-bar-fill.you{background:var(--accent);} .compare-bar-fill.median{background:var(--faint);}
+.compare-bar-row .val{font-family:'IBM Plex Mono'; text-align:right; font-weight:600;}
+.legend-row{display:flex; gap:16px; margin-top:14px; font-size:11.5px; color:var(--muted);}
+.legend-row span{display:flex; align-items:center; gap:6px;}
+.legend-swatch{width:9px; height:9px; border-radius:2px;}
+
+.table-wrap{overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius);}
+table{width:100%; border-collapse:collapse; font-size:12.5px; min-width:640px;}
+thead th{text-align:left; font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:600; padding:10px 14px; background:var(--surface-2); border-bottom:1px solid var(--border); white-space:nowrap;}
+thead th.num, td.num{text-align:right;}
+tbody td{padding:9px 14px; border-bottom:1px solid var(--border); white-space:nowrap; font-family:'IBM Plex Mono';}
+tbody td.name{font-family:'IBM Plex Sans'; font-weight:500;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr.you{background:var(--accent-soft);}
+tbody tr.you td.name{color:var(--accent-ink); font-weight:700;}
+.rank{color:var(--faint); font-family:'IBM Plex Mono';}
+
+.skill-card{padding:14px 16px;}
+.skill-main{font-size:14px; font-weight:600; display:flex; align-items:baseline; gap:8px;}
+.skill-main .lv{font-family:'IBM Plex Mono'; font-size:11px; color:var(--accent-ink); font-weight:600;}
+.supports{margin-top:8px; display:flex; flex-wrap:wrap; gap:5px;}
+.support-chip{font-size:11px; padding:3px 8px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border); color:var(--muted);}
+
+.item-card{padding:15px 17px;}
+.item-head{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+.item-slot{font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); font-weight:600;}
+.item-name{font-size:14.5px; font-weight:600; margin-top:5px;}
+.item-base{font-size:12px; color:var(--muted); margin-top:1px;}
+.item-ilvl{font-family:'IBM Plex Mono'; font-size:10.5px; color:var(--faint); white-space:nowrap; text-align:right;}
+.rarity-rare .item-ilvl b{color:#a3822f;} .rarity-unique .item-ilvl b{color:#a5652f;} .rarity-magic .item-ilvl b{color:#3f6bb0;}
+@media (prefers-color-scheme: dark){
+  .rarity-rare .item-ilvl b{color:#d9b45c;} .rarity-unique .item-ilvl b{color:#d99a5c;} .rarity-magic .item-ilvl b{color:#7ea3e0;}
+}
+:root[data-theme="dark"] .rarity-rare .item-ilvl b{color:#d9b45c;}
+:root[data-theme="dark"] .rarity-unique .item-ilvl b{color:#d99a5c;}
+:root[data-theme="dark"] .rarity-magic .item-ilvl b{color:#7ea3e0;}
+.swap-flag{display:inline-block; margin-top:10px; font-size:10.5px; color:var(--warning); border:1px solid currentColor; border-radius:3px; padding:2px 7px; letter-spacing:.03em;}
+
+.rec-list{display:flex; flex-direction:column; gap:10px;}
+.rec-item{display:grid; grid-template-columns:26px 1fr; gap:12px; padding:14px 16px;}
+.rec-num{font-family:'Cinzel'; font-weight:700; font-size:15px; color:var(--accent-ink);}
+.rec-item h4{font-size:14px; font-weight:600; margin-bottom:4px;}
+.rec-item p{font-size:13px; color:var(--muted); line-height:1.5;}
+
+.note-card{padding:16px 18px; display:flex; gap:12px;}
+.note-icon{flex:none; width:18px; height:18px; margin-top:1px; color:var(--muted);}
+.note-card h4{font-size:13px; font-weight:600; margin-bottom:4px;}
+.note-card p{font-size:12.5px; color:var(--muted); line-height:1.5;}
+.note-card code{font-family:'IBM Plex Mono'; font-size:11.5px; background:var(--surface-2); padding:1px 5px; border-radius:3px;}
+
+footer{max-width:1180px; margin:64px auto 0; padding:22px 24px 0; border-top:1px solid var(--border); color:var(--faint); font-size:11.5px; display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+
+/* ---------- Data & Sync tab ---------- */
+.sync-grid{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+.sync-card{padding:20px 22px;}
+.sync-card h3{font-size:14.5px; font-weight:600; margin-bottom:6px; display:flex; align-items:center; gap:8px;}
+.sync-card p{font-size:12.5px; color:var(--muted); line-height:1.55; margin-bottom:12px;}
+.sync-card textarea{
+  width:100%; min-height:120px; resize:vertical; font-family:'IBM Plex Mono'; font-size:11.5px;
+  background:var(--surface-2); border:1px solid var(--border); border-radius:4px; color:var(--ink); padding:10px 12px;
+}
+.btn{
+  appearance:none; border:1px solid var(--border-strong); background:var(--surface-2); color:var(--ink);
+  font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:5px; display:inline-flex; align-items:center; gap:7px;
+  transition:background-color .15s ease, border-color .15s ease;
+}
+.btn:hover{border-color:var(--accent);}
+.btn.primary{background:var(--accent); border-color:var(--accent); color:#20180a;}
+.btn.primary:hover{filter:brightness(1.06);}
+.btn:disabled{opacity:.5; cursor:not-allowed;}
+.btn-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+.sync-status{font-size:11.5px; margin-top:10px; min-height:16px;}
+.sync-status.ok{color:var(--good);} .sync-status.err{color:var(--critical);}
+.kv-row{display:flex; justify-content:space-between; gap:12px; font-size:12.5px; padding:6px 0; border-bottom:1px solid var(--border);}
+.kv-row:last-child{border-bottom:none;}
+.kv-row .k{color:var(--muted);} .kv-row .v{font-family:'IBM Plex Mono'; font-weight:600;}
+.dropzone{
+  border:1.5px dashed var(--border-strong); border-radius:6px; padding:16px; text-align:center;
+  font-size:12px; color:var(--faint); margin-bottom:10px; transition:border-color .15s ease, background-color .15s ease;
+}
+.dropzone.drag{border-color:var(--accent); background:var(--accent-soft);}
+
+@media (max-width:860px){
+  .hero{grid-template-columns:1fr;}
+  .grid-3,.grid-4,.compare-tiles,.sync-grid{grid-template-columns:repeat(2,1fr);}
+}
+@media (max-width:560px){
+  .grid-2,.grid-3,.grid-4,.compare-tiles,.sync-grid{grid-template-columns:1fr;}
+  .res-row{grid-template-columns:88px 1fr 60px;}
+  .hero-plate{padding:22px 18px;} .hero-name{font-size:30px;}
+  .import-card{padding:28px 20px;}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand" id="brand" title="Back to import"><span class="rune">⟐</span> <span id="brand-text">POE2 LEDGER</span></div>
+    <nav class="tabbar" id="tabbar" role="tablist" aria-label="Sections" style="display:none;">
+      <button role="tab" data-tab="overview">Overview</button>
+      <button role="tab" data-tab="defenses">Defenses</button>
+      <button role="tab" data-tab="tree">Passive Tree</button>
+      <button role="tab" data-tab="ladder">Ladder</button>
+      <button role="tab" data-tab="gear">Skills &amp; Gear</button>
+      <button role="tab" data-tab="notes">Recommendations</button>
+      <button role="tab" data-tab="sync">Data &amp; Sync</button>
+    </nav>
+    <button class="btn-new" id="btn-newanalysis" style="display:none;">New</button>
+  </div>
+</header>
+
+<!-- ================= IMPORT SCREEN ================= -->
+<div class="import-wrap" id="import-screen">
+  <div class="plate import-card">
+    <div class="rune-big">⟐ ⟐ ⟐</div>
+    <h1 class="display">Build Ledger</h1>
+    <div class="sub">Paste a poe.ninja profile URL to get defenses, passive tree, ladder comparison, and gear — all in one place.</div>
+    <form class="import-form" id="import-form">
+      <input type="url" id="url-input" placeholder="https://poe.ninja/poe2/profile/Account-1234/league/character/Name" required autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button type="submit" id="analyze-btn"><span class="spinner" id="analyze-spinner"></span><span id="analyze-label">Analyze</span></button>
+    </form>
+    <div class="import-error" id="import-error"></div>
+    <div class="import-hint">Works with any public poe.ninja PoE2 character profile.</div>
+    <div class="recent-list" id="recent-list"></div>
+  </div>
+</div>
+
+<!-- ================= LEDGER ================= -->
+<div class="shell" id="ledger-shell" style="display:none;">
+
+<section class="panel" id="panel-overview" data-panel="overview">
+  <div class="hero">
+    <div class="plate hero-plate" id="hero-plate"></div>
+    <div class="stat-tiles" id="hero-stats"></div>
+  </div>
+</section>
+
+<section class="panel" id="panel-defenses" data-panel="defenses">
+  <div class="section-head"><h2>Defenses</h2><span class="count">reconciled against raw poe.ninja stats</span></div>
+  <div class="grid-2">
+    <div class="plate pad">
+      <div class="sw-title">Resistances vs. 75% cap</div>
+      <div class="res-grid" id="res-grid"></div>
+      <div class="d" id="res-note" style="margin-top:14px;color:var(--muted);font-size:11.5px;"></div>
+    </div>
+    <div class="plate pad">
+      <div class="sw-title">Max hit taken by damage type</div>
+      <div class="res-grid" id="maxhit-grid"></div>
+      <div class="d" id="maxhit-note" style="margin-top:14px;color:var(--muted);font-size:11.5px;"></div>
+    </div>
+  </div>
+  <div class="grid-2" style="margin-top:14px;">
+    <div class="plate pad"><div class="sw-title" style="color:var(--good)">Strengths</div><ul class="sw-list" id="strengths-list"></ul></div>
+    <div class="plate pad"><div class="sw-title" style="color:var(--critical)">Weaknesses</div><ul class="sw-list" id="weaknesses-list"></ul></div>
+  </div>
+</section>
+
+<section class="panel" id="panel-tree" data-panel="tree">
+  <div class="section-head"><h2>Passive Tree</h2><span class="count" id="tree-count"></span></div>
+  <div class="grid-4" id="tree-stats"></div>
+  <div style="margin-top:22px;"><div class="sw-title">Notables allocated</div><div class="grid-3" id="notables-grid"></div></div>
+  <div class="grid-2" style="margin-top:22px; align-items:start;">
+    <div class="plate pad"><div class="sw-title">Small node allocation</div><div id="smallnodes" class="smallnode-list"></div></div>
+    <div><div class="sw-title">Jewels socketed</div><div style="display:flex;flex-direction:column;gap:10px;" id="jewels"></div></div>
+  </div>
+  <div style="margin-top:22px;"><div class="sw-title">Nearest unallocated notables</div><div class="grid-3" id="nearby-grid"></div></div>
+  <div class="plate note-card" id="disconnect-card" style="margin-top:18px; display:none;">
+    <svg class="note-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.3"/><path d="M10 9v4.2M10 6.6v.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+    <div><h4>About the "disconnected tree" flag</h4><p id="disconnect-note"></p></div>
+  </div>
+</section>
+
+<section class="panel" id="panel-ladder" data-panel="ladder">
+  <div class="section-head"><h2>Ladder Comparison</h2><span class="count" id="ladder-count"></span></div>
+  <div class="compare-tiles" id="compare-tiles"></div>
+  <div class="legend-row"><span><span class="legend-swatch" style="background:var(--accent)"></span>You</span><span><span class="legend-swatch" style="background:var(--faint)"></span>Cohort median</span></div>
+  <div style="margin-top:26px;">
+    <div class="sw-title" id="ladder-table-title"></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Character</th><th class="num">Level</th><th class="num">Life</th><th class="num">ES</th><th class="num">EHP</th><th class="num">DPS</th></tr></thead>
+      <tbody id="ladder-body"></tbody>
+    </table></div>
+    <div class="d" style="margin-top:8px;color:var(--faint);font-size:11px;">Data: poe.ninja builds search. Row order as returned (not sorted by a single stat).</div>
+  </div>
+</section>
+
+<section class="panel" id="panel-gear" data-panel="gear">
+  <div class="section-head"><h2>Skills &amp; Gear</h2><span class="count" id="gear-count"></span></div>
+  <div class="sw-title">Linked skill setups</div>
+  <div class="grid-3" id="skills-grid"></div>
+  <div style="margin-top:26px;"><div class="sw-title">Equipment — active weapon set</div><div class="grid-3" id="gear-grid-main"></div></div>
+  <div style="margin-top:22px;" id="consum-section"><div class="sw-title">Flasks &amp; charms</div><div class="grid-4" id="gear-grid-consum"></div></div>
+  <div style="margin-top:22px;" id="swap-section"><div class="sw-title">Weapon swap set <span style="color:var(--warning);font-weight:500;">— inactive unless swapped</span></div><div class="grid-2" id="gear-grid-swap"></div></div>
+</section>
+
+<section class="panel" id="panel-notes" data-panel="notes">
+  <div class="section-head"><h2>Recommendations</h2><span class="count">fine-tuning, ranked by expected impact</span></div>
+  <div class="rec-list" id="rec-list"></div>
+  <div style="margin-top:28px;"><div class="sw-title">Limitations of this analysis</div><div class="grid-2" id="limits-grid"></div></div>
+</section>
+
+<section class="panel" id="panel-sync" data-panel="sync">
+  <div class="section-head"><h2>Data &amp; Sync</h2><span class="count">this ledger is a point-in-time snapshot</span></div>
+
+  <div class="sync-grid">
+    <div class="plate sync-card">
+      <h3>📍 Snapshot provenance</h3>
+      <div class="kv-row"><span class="k">Source</span><span class="v" id="sync-source">poe.ninja profile import</span></div>
+      <div class="kv-row"><span class="k">Character</span><span class="v" id="sync-char">—</span></div>
+      <div class="kv-row"><span class="k">League</span><span class="v" id="sync-league">—</span></div>
+      <div class="kv-row"><span class="k">Generated</span><span class="v" id="sync-generated">—</span></div>
+    </div>
+
+    <div class="plate sync-card">
+      <h3>🔄 Refresh this character</h3>
+      <p>Pulls the profile URL again and re-renders every tab with current data. Same page, no re-typing needed.</p>
+      <div class="btn-row"><button class="btn primary" id="btn-refresh">Re-analyze now</button></div>
+      <div class="sync-status" id="refresh-status"></div>
+    </div>
+
+    <div class="plate sync-card">
+      <h3>⇩ Export current snapshot</h3>
+      <p>Save everything currently loaded as a JSON file — a backup, or something to hand to an AI assistant for deeper analysis.</p>
+      <div class="btn-row"><button class="btn primary" id="btn-export">Download snapshot.json</button></div>
+      <div class="sync-status" id="export-status"></div>
+    </div>
+
+    <div class="plate sync-card">
+      <h3>⇧ Import a snapshot</h3>
+      <p>Paste or drop a snapshot JSON (same shape as the export above) to re-render this page from it instantly — no network involved.</p>
+      <div class="dropzone" id="dropzone">Drop a .json file here, or paste below</div>
+      <textarea id="import-text" placeholder="{ &quot;character&quot;: { ... }, ... }"></textarea>
+      <div class="btn-row"><button class="btn primary" id="btn-import">Load snapshot</button></div>
+      <div class="sync-status" id="import-status"></div>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer id="footer" style="display:none;">
+  <span>Source: poe.ninja profile import · <span id="foot-account">—</span> / <span id="foot-char">—</span> · <span id="foot-league">—</span></span>
+  <span>Built on poe2-mcp's analysis code</span>
+</footer>
+
+<script>
+let DATA = null;
+const RECENT_KEY = 'poe2-ledger-recent';
+const LAST_KEY = 'poe2-ledger-last';
+
+function el(tag, cls, html){ const e = document.createElement(tag); if(cls) e.className = cls; if(html!==undefined) e.innerHTML = html; return e; }
+function fmt(n){ return typeof n === 'number' ? n.toLocaleString('en-US') : n; }
+function cleanMod(m){
+  const enchant = m.includes('{enchant}') || m.includes('{rune}');
+  return { text: m.replace(/\{[a-z]+\}/g,''), enchant };
+}
+
+function itemCard(it){
+  const rc = it.rarity==='Unique' ? 'rarity-unique' : it.rarity==='Magic' ? 'rarity-magic' : 'rarity-rare';
+  const c = el('div', `plate item-card ${rc}`);
+  c.innerHTML = `<div class="item-head">
+      <div><div class="item-slot">${it.slot}</div><div class="item-name">${it.name}</div>${it.base ? `<div class="item-base">${it.base}</div>` : ''}</div>
+      <div class="item-ilvl"><b>${it.rarity}</b><br>ilvl ${it.ilvl}</div>
+    </div>
+    <ul class="modlist">${(it.mods||[]).map(m=>{ const c2=cleanMod(m); return `<li class="${c2.enchant?'enchant':''}">${c2.text}</li>`; }).join('')}</ul>`;
+  return c;
+}
+
+function render(data){
+  DATA = data;
+  const c = data.character, s = data.stats, sc = data.score;
+
+  document.getElementById('brand-text').textContent = c.name;
+
+  document.getElementById('hero-plate').innerHTML = `
+    <div class="hero-top">
+      <div>
+        <div class="eyebrow">${c.classType} · ${c.ascendancy} · ${c.league}</div>
+        <h1 class="hero-name display">${c.name}</h1>
+        <div class="hero-tags">
+          <span class="tag"><span class="dot"></span>${c.account}</span>
+          <span class="tag">poe.ninja profile import</span>
+        </div>
+      </div>
+      <div class="hero-level"><div class="num mono">${c.level}</div><div class="lbl">Level</div></div>
+    </div>
+    <div class="tier-row">
+      <div class="gauge-wrap">
+        <svg viewBox="0 0 104 104">
+          <circle cx="52" cy="52" r="45" fill="none" stroke="var(--border)" stroke-width="8"/>
+          <circle cx="52" cy="52" r="45" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round"
+            stroke-dasharray="282.7" stroke-dashoffset="${(282.7*(1-sc.overall)).toFixed(1)}"/>
+        </svg>
+        <div class="gauge-label"><div class="grade">${sc.tier}</div><div class="score mono">${sc.overall.toFixed(2)}</div></div>
+      </div>
+      <div class="tier-copy"><div class="k">Overall build score</div><div class="v">${sc.note}</div></div>
+    </div>`;
+
+  document.getElementById('hero-stats').innerHTML = `
+    <div class="plate stat-tile"><div class="k">Life</div><div class="v">${fmt(s.life)}</div><div class="d">poe.ninja computed</div></div>
+    <div class="plate stat-tile"><div class="k">Energy Shield</div><div class="v">${fmt(s.es)}</div><div class="d">${s.ward ? `+${s.ward} Ward on top` : 'No Ward'}</div></div>
+    <div class="plate stat-tile"><div class="k">Combined pool</div><div class="v">${fmt(s.life+s.es)}</div><div class="d">Life + Energy Shield</div></div>
+    <div class="plate stat-tile"><div class="k">Evasion Rating</div><div class="v">${fmt(s.evasion)}</div><div class="d">${s.evadeChance}% evade chance</div></div>
+    <div class="plate stat-tile"><div class="k">EHP <small>(this app)</small></div><div class="v">${fmt(s.ehpMcp)}</div><div class="d">poe.ninja shows ${fmt(s.ehpPoeNinja)} — different formula</div></div>
+    <div class="plate stat-tile"><div class="k">DPS</div><div class="v">—</div><div class="d">Not computed — see Recommendations</div></div>`;
+
+  const R = data.resistances, dmgColors = {Fire:'var(--fire)', Cold:'var(--cold)', Lightning:'var(--lightning)', Chaos:'var(--chaos)'};
+  document.getElementById('res-grid').innerHTML = ['Fire','Cold','Lightning','Chaos'].map(k=>{
+    const v = R[k.toLowerCase()]; const crit = k==='Chaos' && v < 40;
+    return `<div class="res-row">
+      <div class="res-name"><span class="res-swatch" style="background:${dmgColors[k]}"></span>${k}</div>
+      <div class="res-track"><div class="res-fill" style="width:${Math.min(Math.max(v,0),75)/75*100}%;background:${dmgColors[k]}"></div><div class="res-cap-line" style="left:100%"></div></div>
+      <div class="res-value ${crit?'crit':''}">${v}%</div>
+    </div>`;
+  }).join('');
+  document.getElementById('res-note').textContent = `Overcap banked: Fire +${R.fireOvercap} · Cold +${R.coldOvercap} · Lightning +${R.lightningOvercap}.`;
+
+  const MH = data.maxHit, mhColors = {Physical:'var(--ink-soft)', Fire:'var(--fire)', Cold:'var(--cold)', Lightning:'var(--lightning)', Chaos:'var(--chaos)'};
+  const mhVals = Object.values(MH).filter(v=>v>0);
+  const mhMax = mhVals.length ? Math.max(...mhVals) : 1;
+  document.getElementById('maxhit-grid').innerHTML = Object.keys(mhColors).map(k=>{
+    const v = MH[k.toLowerCase()] || 0; const crit = k==='Chaos';
+    return `<div class="res-row">
+      <div class="res-name"><span class="res-swatch" style="background:${mhColors[k]}"></span>${k}</div>
+      <div class="res-track"><div class="res-fill" style="width:${(v/mhMax*100).toFixed(0)}%;background:${mhColors[k]}"></div></div>
+      <div class="res-value ${crit?'crit':''}">${fmt(v)}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('maxhit-note').textContent = R.chaos < 40 ? `Chaos hits land much harder relative to elemental ones at ${R.chaos}% resistance.` : `Damage taken per hit by type, from poe.ninja's own calculation.`;
+
+  document.getElementById('strengths-list').innerHTML = (data.strengths||[]).map(t=>
+    `<li><svg class="sw-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="var(--good)" stroke-width="1.4"/><path d="M5 8.2l2 2 4-4.4" stroke="var(--good)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>${t}</li>`).join('') || '<li class="empty-note">None detected</li>';
+  document.getElementById('weaknesses-list').innerHTML = (data.weaknesses||[]).map(w=>
+    `<li><svg class="sw-icon" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="var(--${w.level||'critical'})" stroke-width="1.4"/><path d="M8 4.5v4.5M8 11.2v.3" stroke="var(--${w.level||'critical'})" stroke-width="1.5" stroke-linecap="round"/></svg>${w.text||w}</li>`).join('') || '<li class="empty-note">None detected</li>';
+
+  document.getElementById('tree-count').textContent = `${data.tree.totalNodes} nodes · ${data.notables.length} notables · ${data.tree.keystonesCount} keystones`;
+  document.getElementById('tree-stats').innerHTML = `
+    <div class="plate stat-tile"><div class="k">Notables</div><div class="v">${data.notables.length}</div></div>
+    <div class="plate stat-tile"><div class="k">Small nodes</div><div class="v">${data.tree.smallNodeTotal}</div></div>
+    <div class="plate stat-tile"><div class="k">Keystones</div><div class="v">${data.tree.keystonesCount}</div></div>
+    <div class="plate stat-tile"><div class="k">Jewel sockets</div><div class="v">${data.tree.jewelSockets}<small>&nbsp;/ ${data.jewels.length} filled</small></div></div>`;
+
+  document.getElementById('notables-grid').innerHTML = data.notables.length ? data.notables.map(n=>
+    `<div class="plate notable-card"><h4>${n.name}</h4>${n.effects.length ? `<p>${n.effects.join('<br>')}</p>` : `<p class="empty">No listed stats</p>`}</div>`).join('') : '<p class="empty-note">No notables allocated</p>';
+
+  const smallnodes = data.smallnodes || [];
+  const maxCount = smallnodes.length ? Math.max(...smallnodes.map(s=>s.count)) : 1;
+  document.getElementById('smallnodes').innerHTML = smallnodes.length ? smallnodes.map(s=>
+    `<div class="smallnode-row"><div class="smallnode-name">${s.name}</div>
+      <div class="smallnode-bar"><i style="width:${(s.count/maxCount*100).toFixed(0)}%"></i></div>
+      <div class="smallnode-count">×${s.count}</div>
+      <div class="smallnode-eff">${s.effect}</div></div>`).join('') : '<p class="empty-note">None</p>';
+
+  document.getElementById('jewels').innerHTML = data.jewels.length ? data.jewels.map(j=>
+    `<div class="plate jewel-card"><div class="slot">${j.slot}</div><h4>${j.name}</h4><div class="base">${j.base}</div>
+      <ul class="modlist">${(j.mods||[]).map(m=>`<li>${m}</li>`).join('')}</ul></div>`).join('') : '<p class="empty-note">No jewels socketed</p>';
+
+  document.getElementById('nearby-grid').innerHTML = data.nearby.length ? data.nearby.map(n=>
+    `<div class="plate notable-card">${n.pick ? '<span class="pick-badge">Nearest pickup</span><br>' : ''}<h4>${n.name} <span style="color:var(--muted);font-weight:400;font-size:11.5px;">— ${n.dist}</span></h4><p>${n.effects.join('<br>')}</p></div>`).join('') : '<p class="empty-note">No nearby notables found</p>';
+
+  document.getElementById('disconnect-card').style.display = data.tree.disconnectNote ? 'flex' : 'none';
+  document.getElementById('disconnect-note').textContent = data.tree.disconnectNote || '';
+
+  const L = data.ladder;
+  document.getElementById('ladder-count').textContent = L.cohort;
+  const metrics = [['Level', L.you.level, L.median.level], ['Life', L.you.life, L.median.life], ['Energy Shield', L.you.es, L.median.es]];
+  document.getElementById('compare-tiles').innerHTML = metrics.map(([label, you, med])=>{
+    const max = Math.max(you||0, med||0, 1);
+    return `<div class="plate compare-tile"><div class="k">${label}</div><div class="compare-bars">
+      <div class="compare-bar-row"><span class="lbl">You</span><div class="compare-bar-track"><div class="compare-bar-fill you" style="width:${((you||0)/max*100).toFixed(0)}%"></div></div><span class="val">${fmt(you)}</span></div>
+      <div class="compare-bar-row"><span class="lbl">Median</span><div class="compare-bar-track"><div class="compare-bar-fill median" style="width:${((med||0)/max*100).toFixed(0)}%"></div></div><span class="val">${fmt(med)}</span></div>
+    </div></div>`;
+  }).join('');
+  document.getElementById('ladder-table-title').textContent = L.table.length ? `Top ${L.table.filter(r=>!r.you).length} ${data.character.ascendancy} builds this league` : 'No ladder data available';
+  document.getElementById('ladder-body').innerHTML = L.table.map((r,i)=>
+    `<tr class="${r.you?'you':''}"><td class="rank">${r.you?'—':i+1}</td><td class="name">${r.name}</td><td class="num">${r.level}</td><td class="num">${fmt(r.life)}</td><td class="num">${fmt(r.es)}</td><td class="num">${r.ehp}</td><td class="num">${r.dps}</td></tr>`).join('');
+
+  document.getElementById('gear-count').textContent = `${data.skills.length} linked setups · ${data.gearMain.length+data.gearConsum.length+data.gearSwap.length} items`;
+  document.getElementById('skills-grid').innerHTML = data.skills.length ? data.skills.map(s=>
+    `<div class="plate skill-card"><div class="skill-main">${s.main} <span class="lv">Lv${s.lv}/${s.q}%</span></div>
+      <div class="supports">${s.supports.map(sp=>`<span class="support-chip">${sp}</span>`).join('')}</div></div>`).join('') : '<p class="empty-note">No skill setups found</p>';
+
+  document.getElementById('gear-grid-main').innerHTML = '';
+  data.gearMain.forEach(it=>document.getElementById('gear-grid-main').appendChild(itemCard(it)));
+  document.getElementById('gear-grid-consum').innerHTML = '';
+  data.gearConsum.forEach(it=>document.getElementById('gear-grid-consum').appendChild(itemCard(it)));
+  document.getElementById('consum-section').style.display = data.gearConsum.length ? 'block' : 'none';
+  document.getElementById('gear-grid-swap').innerHTML = '';
+  data.gearSwap.forEach(it=>document.getElementById('gear-grid-swap').appendChild(itemCard(it)));
+  document.getElementById('swap-section').style.display = data.gearSwap.length ? 'block' : 'none';
+
+  document.getElementById('rec-list').innerHTML = data.recs.map((r,i)=>
+    `<div class="plate rec-item"><div class="rec-num mono">${String(i+1).padStart(2,'0')}</div><div><h4>${r.title}</h4><p>${r.body}</p></div></div>`).join('');
+  document.getElementById('limits-grid').innerHTML = data.limits.map(l=>
+    `<div class="plate note-card"><svg class="note-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="1.3"/><path d="M10 9v4.2M10 6.6v.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><div><h4>${l.title}</h4><p>${l.body}</p></div></div>`).join('');
+
+  document.getElementById('sync-char').textContent = `${c.name} (${c.classType} / ${c.ascendancy})`;
+  document.getElementById('sync-league').textContent = c.league;
+  document.getElementById('sync-generated').textContent = new Date(data.meta.generatedAt).toLocaleString();
+  document.getElementById('foot-account').textContent = c.account;
+  document.getElementById('foot-char').textContent = c.name;
+  document.getElementById('foot-league').textContent = c.league;
+}
+
+/* ---------- tabs ---------- */
+const tabButtons = [...document.querySelectorAll('#tabbar button')];
+const panels = [...document.querySelectorAll('.panel')];
+function activateTab(id, push){
+  tabButtons.forEach(b=>b.setAttribute('aria-selected', String(b.dataset.tab===id)));
+  panels.forEach(p=>p.classList.toggle('active', p.dataset.panel===id));
+  window.scrollTo({top:0});
+  if(push !== false) history.replaceState(null, '', '#'+id);
+}
+tabButtons.forEach(b=>b.addEventListener('click', ()=>activateTab(b.dataset.tab)));
+
+function showLedger(){
+  document.getElementById('import-screen').style.display = 'none';
+  document.getElementById('ledger-shell').style.display = 'block';
+  document.getElementById('footer').style.display = 'flex';
+  document.getElementById('tabbar').style.display = 'flex';
+  document.getElementById('btn-newanalysis').style.display = 'inline-flex';
+  const initial = (location.hash || '#overview').slice(1);
+  activateTab(tabButtons.some(b=>b.dataset.tab===initial) ? initial : 'overview', false);
+}
+function showImportScreen(){
+  document.getElementById('import-screen').style.display = 'flex';
+  document.getElementById('ledger-shell').style.display = 'none';
+  document.getElementById('footer').style.display = 'none';
+  document.getElementById('tabbar').style.display = 'none';
+  document.getElementById('btn-newanalysis').style.display = 'none';
+  document.getElementById('brand-text').textContent = 'POE2 LEDGER';
+  history.replaceState(null, '', location.pathname);
+  renderRecentList();
+  document.getElementById('url-input').focus();
+}
+document.getElementById('brand').addEventListener('click', showImportScreen);
+document.getElementById('btn-newanalysis').addEventListener('click', showImportScreen);
+
+/* ---------- recent list ---------- */
+function getRecent(){ try{ return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); }catch(e){ return []; } }
+function saveRecent(url, name){
+  let list = getRecent().filter(r=>r.url !== url);
+  list.unshift({url, name, at: Date.now()});
+  list = list.slice(0, 6);
+  try{ localStorage.setItem(RECENT_KEY, JSON.stringify(list)); }catch(e){}
+}
+function removeRecent(url){
+  const list = getRecent().filter(r=>r.url !== url);
+  try{ localStorage.setItem(RECENT_KEY, JSON.stringify(list)); }catch(e){}
+  renderRecentList();
+}
+function renderRecentList(){
+  const list = getRecent();
+  const box = document.getElementById('recent-list');
+  if(!list.length){ box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="import-hint" style="margin-bottom:2px;text-align:left;">Recent</div>` + list.map(r=>
+    `<div class="recent-item"><button class="load" data-url="${r.url.replace(/"/g,'&quot;')}">${r.name || r.url}</button><button class="x" data-url="${r.url.replace(/"/g,'&quot;')}">✕</button></div>`
+  ).join('');
+  box.querySelectorAll('.load').forEach(b=>b.addEventListener('click', ()=> runAnalyze(b.dataset.url)));
+  box.querySelectorAll('.x').forEach(b=>b.addEventListener('click', (e)=>{ e.stopPropagation(); removeRecent(b.dataset.url); }));
+}
+
+/* ---------- analyze ---------- */
+const form = document.getElementById('import-form');
+const urlInput = document.getElementById('url-input');
+const analyzeBtn = document.getElementById('analyze-btn');
+const spinner = document.getElementById('analyze-spinner');
+const label = document.getElementById('analyze-label');
+const errBox = document.getElementById('import-error');
+
+async function runAnalyze(url){
+  errBox.classList.remove('show'); errBox.textContent = '';
+  analyzeBtn.disabled = true; spinner.classList.add('show'); label.textContent = 'Analyzing…';
+  try{
+    const resp = await fetch('/api/analyze', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({url})
+    });
+    const body = await resp.json().catch(()=>({}));
+    if(!resp.ok){ throw new Error(body.detail || `Request failed (${resp.status})`); }
+    render(body);
+    try{ localStorage.setItem(LAST_KEY, JSON.stringify(body)); }catch(e){}
+    saveRecent(url, body.character ? body.character.name : url);
+    showLedger();
+  }catch(err){
+    errBox.textContent = err.message || 'Something went wrong — try again.';
+    errBox.classList.add('show');
+  }finally{
+    analyzeBtn.disabled = false; spinner.classList.remove('show'); label.textContent = 'Analyze';
+  }
+}
+form.addEventListener('submit', (e)=>{ e.preventDefault(); const url = urlInput.value.trim(); if(url) runAnalyze(url); });
+
+/* ---------- Data & Sync actions ---------- */
+document.getElementById('btn-refresh').addEventListener('click', async ()=>{
+  const status = document.getElementById('refresh-status');
+  if(!DATA || !DATA.meta || !DATA.meta.source){ status.textContent = 'No source URL on record.'; status.className = 'sync-status err'; return; }
+  status.textContent = 'Refreshing…'; status.className = 'sync-status';
+  await runAnalyze(DATA.meta.source);
+  status.textContent = 'Refreshed.'; status.className = 'sync-status ok';
+});
+
+document.getElementById('btn-export').addEventListener('click', async ()=>{
+  const exportStatus = document.getElementById('export-status');
+  const payload = JSON.stringify(DATA, null, 2);
+  const blob = new Blob([payload], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = `${(DATA.character.name||'build').toLowerCase()}-snapshot.json`; a.click();
+  URL.revokeObjectURL(url);
+  exportStatus.textContent = 'Downloaded.'; exportStatus.className = 'sync-status ok';
+});
+
+const importText = document.getElementById('import-text');
+const importStatus = document.getElementById('import-status');
+const dropzone = document.getElementById('dropzone');
+function tryLoad(text){
+  let parsed;
+  try{ parsed = JSON.parse(text); }
+  catch(e){ importStatus.textContent = "That isn't valid JSON."; importStatus.className = 'sync-status err'; return; }
+  if(!parsed.character || !parsed.stats){ importStatus.textContent = 'Missing character/stats — is this a ledger snapshot?'; importStatus.className = 'sync-status err'; return; }
+  render(parsed);
+  showLedger();
+  importStatus.textContent = 'Loaded.'; importStatus.className = 'sync-status ok';
+}
+document.getElementById('btn-import').addEventListener('click', ()=> tryLoad(importText.value));
+['dragover','dragenter'].forEach(evt=>dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.classList.add('drag'); }));
+['dragleave','drop'].forEach(evt=>dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.classList.remove('drag'); }));
+dropzone.addEventListener('drop', e=>{
+  const f = e.dataTransfer.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{ importText.value = reader.result; tryLoad(reader.result); };
+  reader.readAsText(f);
+});
+
+/* ---------- boot ---------- */
+renderRecentList();
+try{
+  const last = localStorage.getItem(LAST_KEY);
+  if(last){ render(JSON.parse(last)); showLedger(); }
+}catch(e){}
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('/sw.js').catch(()=>{}); });
+}
+</script>
+</body>
+</html>
