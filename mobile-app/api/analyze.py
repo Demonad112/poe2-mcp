@@ -29,6 +29,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None
+
 from src.api.poe_ninja_api import parse_poe_ninja_url
 from src.api.character_fetcher import CharacterFetcher
 from src.api.poe_ninja_ladder import LadderClient
@@ -460,3 +465,135 @@ async def analyze(req: AnalyzeRequest) -> Dict[str, Any]:
 @app.get("/api/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# AI companion — real Claude API chat about the currently-loaded snapshot.
+# Requires an ANTHROPIC_API_KEY environment variable set on the Vercel
+# project (Project Settings -> Environment Variables); this endpoint never
+# stores or logs that key beyond reading it from the environment.
+# ---------------------------------------------------------------------------
+
+CHAT_MODEL = os.environ.get("CLAUDE_CHAT_MODEL", "claude-sonnet-5")
+_anthropic_client: Optional["Anthropic"] = None
+
+
+def _get_anthropic_client() -> "Anthropic":
+    global _anthropic_client
+    if _anthropic_client is None:
+        if Anthropic is None:
+            raise HTTPException(
+                status_code=503,
+                detail="The anthropic package isn't installed on the server.",
+            )
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="AI companion isn't configured — add ANTHROPIC_API_KEY as an environment "
+                "variable in the Vercel project settings, then redeploy.",
+            )
+        _anthropic_client = Anthropic(api_key=api_key)
+    return _anthropic_client
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: List[ChatMessage] = []
+    snapshot: Dict[str, Any]
+
+
+def _snapshot_summary(snapshot: Dict[str, Any]) -> str:
+    """Condense the ledger snapshot into a compact text block for the system
+    prompt — the raw snapshot carries full mod text / raw_data noise that
+    would waste tokens without helping the model answer build questions."""
+    c = snapshot.get("character", {})
+    s = snapshot.get("stats", {})
+    r = snapshot.get("resistances", {})
+    t = snapshot.get("tree", {})
+    ladder = snapshot.get("ladder", {})
+    score = snapshot.get("score", {})
+
+    lines = [
+        f"Character: {c.get('name')} — {c.get('classType')} / {c.get('ascendancy')}, "
+        f"level {c.get('level')}, league {c.get('league')}",
+        f"Build score: {score.get('overall')} (tier {score.get('tier')}) — {score.get('note')}",
+        f"Life {s.get('life')}, Energy Shield {s.get('es')}, Ward {s.get('ward')}, "
+        f"Evasion {s.get('evasion')} ({s.get('evadeChance')}% evade), EHP {s.get('ehpMcp')}",
+        f"Resistances — Fire {r.get('fire')}%, Cold {r.get('cold')}%, "
+        f"Lightning {r.get('lightning')}%, Chaos {r.get('chaos')}%",
+        f"Passive tree — {t.get('totalNodes')} nodes, {t.get('keystonesCount')} keystones, "
+        f"{len(snapshot.get('notables', []))} notables, {t.get('jewelSockets')} jewel sockets"
+        + (f" (note: {t.get('disconnectNote')})" if t.get("disconnectNote") else ""),
+        f"Ladder comparison — {ladder.get('cohort')}",
+    ]
+
+    notables = snapshot.get("notables", [])
+    if notables:
+        lines.append("Notables: " + "; ".join(n.get("name", "?") for n in notables[:15]))
+
+    skills = snapshot.get("skills", [])
+    if skills:
+        lines.append(
+            "Linked skill setups: "
+            + "; ".join(f"{sk.get('main')} ({', '.join(sk.get('supports', []))})" for sk in skills[:6])
+        )
+
+    gear = snapshot.get("gearMain", [])
+    if gear:
+        lines.append(
+            "Equipped gear: "
+            + "; ".join(f"{it.get('slot')}: {it.get('name')} ({it.get('rarity')})" for it in gear)
+        )
+
+    strengths = snapshot.get("strengths", [])
+    if strengths:
+        lines.append("Strengths: " + "; ".join(strengths))
+
+    weaknesses = snapshot.get("weaknesses", [])
+    if weaknesses:
+        lines.append("Weaknesses: " + "; ".join(w.get("text", w) if isinstance(w, dict) else w for w in weaknesses))
+
+    recs = snapshot.get("recs", [])
+    if recs:
+        lines.append("Existing recommendations: " + "; ".join(rc.get("title", "?") for rc in recs))
+
+    return "\n".join(lines)
+
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest) -> Dict[str, str]:
+    client = _get_anthropic_client()
+
+    system_prompt = (
+        "You are a knowledgeable Path of Exile 2 build companion embedded in a build-ledger "
+        "app. You're discussing one specific character snapshot with its owner. Be specific, "
+        "reference actual numbers from the snapshot below, and keep answers focused and concise "
+        "(a few sentences to a short paragraph, using bullet points only when comparing multiple "
+        "options). You do not have access to live game data beyond what's in the snapshot, and "
+        "this app doesn't compute DPS — say so plainly if asked and you can't back it with data "
+        "rather than guessing a number.\n\n"
+        f"Current build snapshot:\n{_snapshot_summary(req.snapshot)}"
+    )
+
+    messages = [{"role": m.role, "content": m.content} for m in req.history]
+    messages.append({"role": "user", "content": req.message})
+
+    try:
+        response = client.messages.create(
+            model=CHAT_MODEL,
+            max_tokens=1024,
+            system=system_prompt,
+            messages=messages,
+        )
+    except Exception as e:
+        logger.error(f"Anthropic API call failed: {e}")
+        raise HTTPException(status_code=502, detail=f"AI companion request failed: {e}")
+
+    reply = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+    return {"reply": reply}
