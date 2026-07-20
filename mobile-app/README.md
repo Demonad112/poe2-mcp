@@ -2,7 +2,7 @@
 
 A standalone, installable PWA that wraps this repo's analysis code (EHP,
 passive tree, ladder comparison) behind a `poe.ninja` profile URL import.
-Paste a profile URL, get the build breakdown, and optionally ask a Claude-
+Paste a profile URL, get the build breakdown, and optionally ask a Gemini-
 powered Companion tab questions about it.
 
 ## Layout
@@ -13,13 +13,18 @@ powered Companion tab questions about it.
 - `api/analyze.py` — FastAPI serverless function with two endpoints:
   - `POST /api/analyze` — fetches and analyzes a character.
   - `POST /api/chat` — the Companion tab's backend. Sends the current
-    snapshot plus the user's message to the Claude API (`anthropic` SDK)
-    and returns the reply. **Requires an `ANTHROPIC_API_KEY` environment
-    variable** on the Vercel project (Project Settings → Environment
-    Variables) — without it, the endpoint returns a 503 explaining what's
-    missing rather than crashing. Optional `CLAUDE_CHAT_MODEL` env var
-    overrides the model (defaults to `claude-sonnet-5`). Usage is billed
-    to whatever Anthropic account owns that API key.
+    snapshot plus the user's message to the Google Gemini API (plain REST
+    call via `httpx`, no extra SDK) and returns the reply. **Requires a
+    Google AI Studio API key** (free tier) set as either `GEMINI_API_KEY`
+    or `ANTHROPIC_API_KEY` (either name works — the code checks
+    `GEMINI_API_KEY` first, then falls back to `ANTHROPIC_API_KEY`; the
+    fallback exists only because that's the variable name this project
+    happened to be configured with first) as an environment variable on
+    the Vercel project (Project Settings → Environment Variables) —
+    without one, the endpoint returns a 503 explaining what's missing
+    rather than crashing. Optional `GEMINI_MODEL` env var overrides the
+    model (defaults to `gemini-2.0-flash`). Usage is billed to whatever
+    Google account the key belongs to (free tier covers light use).
   - `GET /api/health` — health check.
 - `api/_vendor/src/` — a lean vendored copy of the subset of `src/` this
   endpoint needs (`config.py`, `api/*`, `calculator/ehp_calculator.py`,

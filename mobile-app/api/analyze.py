@@ -29,11 +29,6 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-try:
-    from anthropic import Anthropic
-except ImportError:
-    Anthropic = None
-
 from src.api.poe_ninja_api import parse_poe_ninja_url
 from src.api.character_fetcher import CharacterFetcher
 from src.api.poe_ninja_ladder import LadderClient
@@ -468,33 +463,30 @@ async def health() -> Dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# AI companion — real Claude API chat about the currently-loaded snapshot.
-# Requires an ANTHROPIC_API_KEY environment variable set on the Vercel
-# project (Project Settings -> Environment Variables); this endpoint never
-# stores or logs that key beyond reading it from the environment.
+# AI companion — real Gemini API chat about the currently-loaded snapshot.
+# Uses a Google AI Studio API key (free tier) rather than the Anthropic API,
+# since that's what's actually configured on this deployment. Reads the key
+# from GEMINI_API_KEY if set, else ANTHROPIC_API_KEY (kept as a fallback name
+# since that's the variable this project's Vercel settings already use —
+# despite the name, its value is expected to be a Google AI Studio key here).
+# This endpoint never stores or logs that key beyond reading it from the
+# environment.
 # ---------------------------------------------------------------------------
 
-CHAT_MODEL = os.environ.get("CLAUDE_CHAT_MODEL", "claude-sonnet-5")
-_anthropic_client: Optional["Anthropic"] = None
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
-def _get_anthropic_client() -> "Anthropic":
-    global _anthropic_client
-    if _anthropic_client is None:
-        if Anthropic is None:
-            raise HTTPException(
-                status_code=503,
-                detail="The anthropic package isn't installed on the server.",
-            )
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise HTTPException(
-                status_code=503,
-                detail="AI companion isn't configured — add ANTHROPIC_API_KEY as an environment "
-                "variable in the Vercel project settings, then redeploy.",
-            )
-        _anthropic_client = Anthropic(api_key=api_key)
-    return _anthropic_client
+def _get_gemini_api_key() -> str:
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="AI companion isn't configured — add a Google AI Studio API key as the "
+            "GEMINI_API_KEY (or ANTHROPIC_API_KEY) environment variable in the Vercel project "
+            "settings, then redeploy.",
+        )
+    return api_key
 
 
 class ChatMessage(BaseModel):
@@ -568,7 +560,7 @@ def _snapshot_summary(snapshot: Dict[str, Any]) -> str:
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest) -> Dict[str, str]:
-    client = _get_anthropic_client()
+    api_key = _get_gemini_api_key()
 
     system_prompt = (
         "You are a knowledgeable Path of Exile 2 build companion embedded in a build-ledger "
@@ -581,19 +573,46 @@ async def chat(req: ChatRequest) -> Dict[str, str]:
         f"Current build snapshot:\n{_snapshot_summary(req.snapshot)}"
     )
 
-    messages = [{"role": m.role, "content": m.content} for m in req.history]
-    messages.append({"role": "user", "content": req.message})
+    # Gemini's generateContent API uses "model" (not "assistant") for the
+    # model's own turns, and takes the system prompt as a separate field
+    # rather than a message in the list.
+    contents = [
+        {"role": "model" if m.role == "assistant" else "user", "parts": [{"text": m.content}]}
+        for m in req.history
+    ]
+    contents.append({"role": "user", "parts": [{"text": req.message}]})
+
+    url = f"{GEMINI_API_BASE}/models/{GEMINI_MODEL}:generateContent"
+    payload = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": contents,
+    }
 
     try:
-        response = client.messages.create(
-            model=CHAT_MODEL,
-            max_tokens=1024,
-            system=system_prompt,
-            messages=messages,
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, params={"key": api_key}, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Gemini API call failed: {e.response.status_code} {e.response.text}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI companion request failed ({e.response.status_code}): {e.response.text[:300]}",
         )
     except Exception as e:
-        logger.error(f"Anthropic API call failed: {e}")
+        logger.error(f"Gemini API call failed: {e}")
         raise HTTPException(status_code=502, detail=f"AI companion request failed: {e}")
 
-    reply = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+    candidates = data.get("candidates") or []
+    reply = ""
+    if candidates:
+        parts = candidates[0].get("content", {}).get("parts", [])
+        reply = "".join(p.get("text", "") for p in parts)
+        if not reply:
+            finish_reason = candidates[0].get("finishReason")
+            if finish_reason and finish_reason != "STOP":
+                reply = f"(No response — Gemini stopped with reason: {finish_reason})"
+    if not reply:
+        reply = "I couldn't generate a response for that — try rephrasing."
+
     return {"reply": reply}
