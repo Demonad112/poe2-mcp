@@ -460,3 +460,159 @@ async def analyze(req: AnalyzeRequest) -> Dict[str, Any]:
 @app.get("/api/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# AI companion — real Gemini API chat about the currently-loaded snapshot.
+# Uses a Google AI Studio API key (free tier) rather than the Anthropic API,
+# since that's what's actually configured on this deployment. Reads the key
+# from GEMINI_API_KEY if set, else ANTHROPIC_API_KEY (kept as a fallback name
+# since that's the variable this project's Vercel settings already use —
+# despite the name, its value is expected to be a Google AI Studio key here).
+# This endpoint never stores or logs that key beyond reading it from the
+# environment.
+# ---------------------------------------------------------------------------
+
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def _get_gemini_api_key() -> str:
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="AI companion isn't configured — add a Google AI Studio API key as the "
+            "GEMINI_API_KEY (or ANTHROPIC_API_KEY) environment variable in the Vercel project "
+            "settings, then redeploy.",
+        )
+    return api_key
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: List[ChatMessage] = []
+    snapshot: Dict[str, Any]
+
+
+def _snapshot_summary(snapshot: Dict[str, Any]) -> str:
+    """Condense the ledger snapshot into a compact text block for the system
+    prompt — the raw snapshot carries full mod text / raw_data noise that
+    would waste tokens without helping the model answer build questions."""
+    c = snapshot.get("character", {})
+    s = snapshot.get("stats", {})
+    r = snapshot.get("resistances", {})
+    t = snapshot.get("tree", {})
+    ladder = snapshot.get("ladder", {})
+    score = snapshot.get("score", {})
+
+    lines = [
+        f"Character: {c.get('name')} — {c.get('classType')} / {c.get('ascendancy')}, "
+        f"level {c.get('level')}, league {c.get('league')}",
+        f"Build score: {score.get('overall')} (tier {score.get('tier')}) — {score.get('note')}",
+        f"Life {s.get('life')}, Energy Shield {s.get('es')}, Ward {s.get('ward')}, "
+        f"Evasion {s.get('evasion')} ({s.get('evadeChance')}% evade), EHP {s.get('ehpMcp')}",
+        f"Resistances — Fire {r.get('fire')}%, Cold {r.get('cold')}%, "
+        f"Lightning {r.get('lightning')}%, Chaos {r.get('chaos')}%",
+        f"Passive tree — {t.get('totalNodes')} nodes, {t.get('keystonesCount')} keystones, "
+        f"{len(snapshot.get('notables', []))} notables, {t.get('jewelSockets')} jewel sockets"
+        + (f" (note: {t.get('disconnectNote')})" if t.get("disconnectNote") else ""),
+        f"Ladder comparison — {ladder.get('cohort')}",
+    ]
+
+    notables = snapshot.get("notables", [])
+    if notables:
+        lines.append("Notables: " + "; ".join(n.get("name", "?") for n in notables[:15]))
+
+    skills = snapshot.get("skills", [])
+    if skills:
+        lines.append(
+            "Linked skill setups: "
+            + "; ".join(f"{sk.get('main')} ({', '.join(sk.get('supports', []))})" for sk in skills[:6])
+        )
+
+    gear = snapshot.get("gearMain", [])
+    if gear:
+        lines.append(
+            "Equipped gear: "
+            + "; ".join(f"{it.get('slot')}: {it.get('name')} ({it.get('rarity')})" for it in gear)
+        )
+
+    strengths = snapshot.get("strengths", [])
+    if strengths:
+        lines.append("Strengths: " + "; ".join(strengths))
+
+    weaknesses = snapshot.get("weaknesses", [])
+    if weaknesses:
+        lines.append("Weaknesses: " + "; ".join(w.get("text", w) if isinstance(w, dict) else w for w in weaknesses))
+
+    recs = snapshot.get("recs", [])
+    if recs:
+        lines.append("Existing recommendations: " + "; ".join(rc.get("title", "?") for rc in recs))
+
+    return "\n".join(lines)
+
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest) -> Dict[str, str]:
+    api_key = _get_gemini_api_key()
+
+    system_prompt = (
+        "You are a knowledgeable Path of Exile 2 build companion embedded in a build-ledger "
+        "app. You're discussing one specific character snapshot with its owner. Be specific, "
+        "reference actual numbers from the snapshot below, and keep answers focused and concise "
+        "(a few sentences to a short paragraph, using bullet points only when comparing multiple "
+        "options). You do not have access to live game data beyond what's in the snapshot, and "
+        "this app doesn't compute DPS — say so plainly if asked and you can't back it with data "
+        "rather than guessing a number.\n\n"
+        f"Current build snapshot:\n{_snapshot_summary(req.snapshot)}"
+    )
+
+    # Gemini's generateContent API uses "model" (not "assistant") for the
+    # model's own turns, and takes the system prompt as a separate field
+    # rather than a message in the list.
+    contents = [
+        {"role": "model" if m.role == "assistant" else "user", "parts": [{"text": m.content}]}
+        for m in req.history
+    ]
+    contents.append({"role": "user", "parts": [{"text": req.message}]})
+
+    url = f"{GEMINI_API_BASE}/models/{GEMINI_MODEL}:generateContent"
+    payload = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": contents,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(url, params={"key": api_key}, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Gemini API call failed: {e.response.status_code} {e.response.text}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI companion request failed ({e.response.status_code}): {e.response.text[:300]}",
+        )
+    except Exception as e:
+        logger.error(f"Gemini API call failed: {e}")
+        raise HTTPException(status_code=502, detail=f"AI companion request failed: {e}")
+
+    candidates = data.get("candidates") or []
+    reply = ""
+    if candidates:
+        parts = candidates[0].get("content", {}).get("parts", [])
+        reply = "".join(p.get("text", "") for p in parts)
+        if not reply:
+            finish_reason = candidates[0].get("finishReason")
+            if finish_reason and finish_reason != "STOP":
+                reply = f"(No response — Gemini stopped with reason: {finish_reason})"
+    if not reply:
+        reply = "I couldn't generate a response for that — try rephrasing."
+
+    return {"reply": reply}

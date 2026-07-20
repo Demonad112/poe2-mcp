@@ -311,6 +311,30 @@ footer{max-width:1180px; margin:64px auto 0; padding:22px 24px 0; border-top:1px
 }
 .dropzone.drag{border-color:var(--accent); background:var(--accent-soft);}
 
+/* ---------- Companion tab ---------- */
+.companion-card{display:flex; flex-direction:column; padding:0; max-width:760px;}
+.companion-log{display:flex; flex-direction:column; gap:14px; padding:22px 22px 8px; min-height:280px; max-height:56vh; overflow-y:auto;}
+.companion-msg{display:flex;}
+.companion-msg.user{justify-content:flex-end;}
+.companion-bubble{max-width:82%; padding:10px 14px; border-radius:10px; font-size:13.5px; line-height:1.55; white-space:pre-wrap;}
+.companion-msg.assistant .companion-bubble{background:var(--surface-2); border:1px solid var(--border); color:var(--ink);}
+.companion-msg.user .companion-bubble{background:var(--accent-soft); border:1px solid var(--accent); color:var(--ink);}
+.companion-msg.pending .companion-bubble{color:var(--faint); font-style:italic;}
+.companion-error{font-size:12.5px; color:var(--critical); padding:0 22px; display:none;}
+.companion-error.show{display:block; margin-bottom:8px;}
+.companion-form{display:flex; gap:8px; padding:16px 22px 22px; border-top:1px solid var(--border);}
+.companion-form input{
+  flex:1; background:var(--surface-2); border:1px solid var(--border); border-radius:6px;
+  padding:11px 13px; color:var(--ink); font-size:13.5px;
+}
+.companion-form input:focus{border-color:var(--accent);}
+.companion-form button{
+  background:var(--accent); color:#20180a; border:none; border-radius:6px; padding:0 18px;
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; justify-content:center; gap:8px;
+}
+.companion-form button:disabled{opacity:.6; cursor:not-allowed;}
+.companion-form .spinner{border-top-color:#20180a;}
+
 @media (max-width:860px){
   .hero{grid-template-columns:1fr;}
   .grid-3,.grid-4,.compare-tiles,.sync-grid{grid-template-columns:repeat(2,1fr);}
@@ -335,6 +359,7 @@ footer{max-width:1180px; margin:64px auto 0; padding:22px 24px 0; border-top:1px
       <button role="tab" data-tab="ladder">Ladder</button>
       <button role="tab" data-tab="gear">Skills &amp; Gear</button>
       <button role="tab" data-tab="notes">Recommendations</button>
+      <button role="tab" data-tab="companion">Companion</button>
       <button role="tab" data-tab="sync">Data &amp; Sync</button>
     </nav>
     <button class="btn-new" id="btn-newanalysis" style="display:none;">New</button>
@@ -429,6 +454,20 @@ footer{max-width:1180px; margin:64px auto 0; padding:22px 24px 0; border-top:1px
   <div class="section-head"><h2>Recommendations</h2><span class="count">fine-tuning, ranked by expected impact</span></div>
   <div class="rec-list" id="rec-list"></div>
   <div style="margin-top:28px;"><div class="sw-title">Limitations of this analysis</div><div class="grid-2" id="limits-grid"></div></div>
+</section>
+
+<section class="panel" id="panel-companion" data-panel="companion">
+  <div class="section-head"><h2>Companion</h2><span class="count">ask Claude about this build</span></div>
+  <div class="plate companion-card">
+    <div class="companion-log" id="companion-log">
+      <div class="companion-msg assistant"><div class="companion-bubble">Ask me anything about this build — gear, passive tree choices, ladder standing, what to fix next. I can see everything on this snapshot.</div></div>
+    </div>
+    <div class="companion-error" id="companion-error"></div>
+    <form class="companion-form" id="companion-form">
+      <input type="text" id="companion-input" placeholder="e.g. What should I upgrade first?" autocomplete="off">
+      <button type="submit" id="companion-send"><span class="spinner" id="companion-spinner"></span><span id="companion-send-label">Ask</span></button>
+    </form>
+  </div>
 </section>
 
 <section class="panel" id="panel-sync" data-panel="sync">
@@ -632,6 +671,8 @@ function render(data){
   document.getElementById('foot-account').textContent = c.account;
   document.getElementById('foot-char').textContent = c.name;
   document.getElementById('foot-league').textContent = c.league;
+
+  resetCompanion();
 }
 
 /* ---------- tabs ---------- */
@@ -761,6 +802,63 @@ dropzone.addEventListener('drop', e=>{
   const reader = new FileReader();
   reader.onload = ()=>{ importText.value = reader.result; tryLoad(reader.result); };
   reader.readAsText(f);
+});
+
+/* ---------- companion ---------- */
+let companionHistory = [];
+const companionLog = document.getElementById('companion-log');
+const companionForm = document.getElementById('companion-form');
+const companionInput = document.getElementById('companion-input');
+const companionSend = document.getElementById('companion-send');
+const companionSpinner = document.getElementById('companion-spinner');
+const companionSendLabel = document.getElementById('companion-send-label');
+const companionError = document.getElementById('companion-error');
+
+function resetCompanion(){
+  companionHistory = [];
+  companionLog.innerHTML = `<div class="companion-msg assistant"><div class="companion-bubble">Ask me anything about this build — gear, passive tree choices, ladder standing, what to fix next. I can see everything on this snapshot.</div></div>`;
+  companionError.classList.remove('show');
+  companionError.textContent = '';
+}
+
+function appendCompanionMsg(role, text, pending){
+  const wrap = el('div', `companion-msg ${role}${pending ? ' pending' : ''}`);
+  wrap.innerHTML = `<div class="companion-bubble"></div>`;
+  wrap.querySelector('.companion-bubble').textContent = text;
+  companionLog.appendChild(wrap);
+  companionLog.scrollTop = companionLog.scrollHeight;
+  return wrap;
+}
+
+companionForm.addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const message = companionInput.value.trim();
+  if(!message || !DATA) return;
+
+  companionError.classList.remove('show'); companionError.textContent = '';
+  appendCompanionMsg('user', message);
+  companionInput.value = '';
+  companionSend.disabled = true; companionSpinner.classList.add('show'); companionSendLabel.textContent = 'Thinking…';
+  const pendingMsg = appendCompanionMsg('assistant', 'Thinking…', true);
+
+  try{
+    const resp = await fetch('/api/chat', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message, history: companionHistory, snapshot: DATA })
+    });
+    const body = await resp.json().catch(()=>({}));
+    if(!resp.ok){ throw new Error(body.detail || `Request failed (${resp.status})`); }
+    pendingMsg.remove();
+    appendCompanionMsg('assistant', body.reply);
+    companionHistory.push({role: 'user', content: message});
+    companionHistory.push({role: 'assistant', content: body.reply});
+  }catch(err){
+    pendingMsg.remove();
+    companionError.textContent = err.message || 'The companion is unavailable right now.';
+    companionError.classList.add('show');
+  }finally{
+    companionSend.disabled = false; companionSpinner.classList.remove('show'); companionSendLabel.textContent = 'Ask';
+  }
 });
 
 /* ---------- boot ---------- */
